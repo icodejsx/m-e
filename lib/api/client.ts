@@ -35,7 +35,15 @@ function buildUrl(
 function readToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return window.localStorage.getItem(AUTH_TOKEN_KEY);
+    const raw = window.localStorage.getItem(AUTH_TOKEN_KEY);
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw) as { token?: unknown };
+      if (parsed && typeof parsed.token === "string") return parsed.token;
+    } catch {
+      // Not JSON — fall through and treat the value itself as the token.
+    }
+    return typeof raw === "string" ? raw : null;
   } catch {
     return null;
   }
