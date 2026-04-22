@@ -1,215 +1,243 @@
 "use client";
 
 import { Target as TargetIcon } from "lucide-react";
-import { ResourcePage } from "@/components/resource/ResourcePage";
-import { Field, Input, Select, Textarea } from "@/components/ui/Input";
+import { RemoteResourcePage } from "@/components/resource/RemoteResourcePage";
+import { Field, Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { ProgressBar } from "@/components/ui/Progress";
-import { useStore } from "@/lib/store";
-import type { Target } from "@/lib/types";
+import { TargetsApi } from "@/lib/api/endpoints";
+import { useReports, useProjects } from "@/lib/api/hooks";
+import type { CreateTargetDto, TargetDto } from "@/lib/api/types";
+
+const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Annually"];
 
 export default function TargetsPage() {
-  const { state } = useStore();
-
-  function latestProgress(targetId: string, baseline: number): number {
-    const rows = state.targetProgress
-      .filter((p) => p.targetId === targetId)
-      .sort(
-        (a, b) =>
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
-      );
-    return rows.length ? rows[rows.length - 1].value : baseline;
-  }
+  const { data: reports } = useReports();
+  const { data: projects } = useProjects();
 
   return (
-    <ResourcePage<Target>
-      collection="targets"
+    <RemoteResourcePage<TargetDto, CreateTargetDto>
       icon={<TargetIcon className="h-5 w-5" />}
       title="Targets"
-      subtitle="Outcome and output targets tracked over reporting periods."
+      subtitle="Quantified targets linked to exactly one report or project."
       singular="Target"
-      plural="Targets"
-      searchKeys={["name", "description"]}
       modalSize="lg"
+      fetchPage={({ page, pageSize }) =>
+        TargetsApi.list({ page, pageSize })
+      }
+      create={(v) => TargetsApi.create(prepare(v))}
+      update={(id, v) => TargetsApi.update(id, prepare(v))}
+      remove={(id) => TargetsApi.remove(id)}
+      toFormValue={(r) => ({
+        targetName: r.targetName ?? "",
+        reportId: r.reportId ?? null,
+        projectId: r.projectId ?? null,
+        reportingPeriodId: r.reportingPeriodId,
+        lgaId: r.lgaId,
+        value: r.value,
+        unitId: r.unitId,
+        frequency: r.frequency ?? "Monthly",
+      })}
+      defaultValue={() => ({
+        targetName: "",
+        value: 0,
+        frequency: "Monthly",
+      })}
+      validate={(v) => {
+        const e: Record<string, string> = {};
+        if (!v.targetName?.trim()) e.targetName = "Target name is required";
+        if (!v.frequency) e.frequency = "Frequency is required";
+        const hasReport = v.reportId != null && v.reportId !== ("" as unknown as number);
+        const hasProject = v.projectId != null && v.projectId !== ("" as unknown as number);
+        if (!hasReport && !hasProject)
+          e.reportId = "Link to either a report or a project";
+        if (hasReport && hasProject)
+          e.reportId = "Provide only one of report or project";
+        return e;
+      }}
       columns={[
+        {
+          key: "id",
+          header: "ID",
+          width: "80px",
+          render: (r) => <span className="muted tabular-nums">#{r.id}</span>,
+          sortBy: (r) => Number(r.id),
+        },
         {
           key: "name",
           header: "Target",
-          sortBy: (r) => r.name,
           render: (r) => (
             <div>
-              <div className="font-medium">{r.name}</div>
-              <div className="mt-0.5 flex items-center gap-1.5">
-                <Badge tone="brand">
-                  {state.mdas.find((m) => m.id === r.mdaId)?.code ?? "—"}
-                </Badge>
-                {r.projectId ? (
-                  <span className="text-xs muted truncate">
-                    {state.projects.find((p) => p.id === r.projectId)?.name}
-                  </span>
-                ) : null}
+              <div className="font-medium">{r.targetName ?? "—"}</div>
+              <div className="mt-0.5 text-xs muted">
+                {r.reportId
+                  ? `Report: ${reports.find((rr) => rr.id === r.reportId)?.reportName ?? `#${r.reportId}`}`
+                  : r.projectId
+                    ? `Project: ${projects.find((pp) => pp.id === r.projectId)?.projectName ?? `#${r.projectId}`}`
+                    : "—"}
               </div>
             </div>
           ),
+          sortBy: (r) => r.targetName ?? "",
         },
         {
-          key: "progress",
-          header: "Progress",
-          sortBy: (r) => {
-            const cur = latestProgress(r.id, r.baseline);
-            return r.target ? (cur / r.target) * 100 : 0;
-          },
-          render: (r) => {
-            const cur = latestProgress(r.id, r.baseline);
-            const unit = state.units.find((u) => u.id === r.unitId);
-            const pct = r.target ? (cur / r.target) * 100 : 0;
-            const tone = pct >= 90 ? "emerald" : pct >= 50 ? "brand" : pct >= 25 ? "amber" : "rose";
-            return (
-              <div className="min-w-[200px]">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="muted">
-                    {cur.toLocaleString()} / {r.target.toLocaleString()} {unit?.symbol ?? ""}
-                  </span>
-                  <span className="muted tabular-nums">{pct.toFixed(0)}%</span>
-                </div>
-                <div className="mt-1">
-                  <ProgressBar value={pct} tone={tone} />
-                </div>
-              </div>
-            );
-          },
+          key: "value",
+          header: "Value",
+          hidden: "md",
+          render: (r) => (
+            <span className="tabular-nums">{r.value.toLocaleString()}</span>
+          ),
+          sortBy: (r) => r.value,
         },
         {
           key: "period",
           header: "Period",
+          hidden: "md",
+          render: (r) => <Badge tone="neutral">Period #{r.reportingPeriodId}</Badge>,
+        },
+        {
+          key: "lga",
+          header: "LGA",
           hidden: "lg",
-          sortBy: (r) => state.reportingPeriods.find((p) => p.id === r.periodId)?.name,
-          render: (r) => state.reportingPeriods.find((p) => p.id === r.periodId)?.name ?? "—",
+          render: (r) => <Badge tone="neutral">LGA #{r.lgaId}</Badge>,
+        },
+        {
+          key: "unit",
+          header: "Unit",
+          hidden: "lg",
+          render: (r) => <Badge tone="neutral">Unit #{r.unitId}</Badge>,
+        },
+        {
+          key: "frequency",
+          header: "Freq.",
+          render: (r) => <Badge tone="info">{r.frequency ?? "—"}</Badge>,
         },
       ]}
-      defaultValue={() => ({
-        name: "",
-        mdaId: state.mdas[0]?.id,
-        unitId: state.units[0]?.id,
-        periodId: state.activePeriodId ?? state.reportingPeriods[0]?.id,
-        baseline: 0,
-        target: 0,
-        projectId: undefined,
-        description: "",
-      })}
-      validate={(v) => {
-        const e: Record<string, string> = {};
-        if (!v.name?.trim()) e.name = "Name is required";
-        if (!v.mdaId) e.mdaId = "MDA is required";
-        if (!v.unitId) e.unitId = "Unit is required";
-        if (!v.periodId) e.periodId = "Period is required";
-        if (v.target === undefined || v.target === null) e.target = "Target value required";
-        else if (Number(v.target) <= 0) e.target = "Target must be positive";
-        return e;
-      }}
-      canDelete={(r) =>
-        state.targetProgress.some((p) => p.targetId === r.id)
-          ? "Remove progress entries for this target first."
-          : null
-      }
-      renderForm={({ value, setField, errors }) => {
-        const projectsForMda = value.mdaId
-          ? state.projects.filter((p) => p.mdaId === value.mdaId)
-          : state.projects;
-        return (
-          <>
-            <Field label="Target name" required error={errors.name}>
-              <Input
-                value={value.name ?? ""}
-                onChange={(e) => setField("name", e.target.value)}
-                invalid={!!errors.name}
-                placeholder="e.g. Children immunised"
-              />
-            </Field>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="MDA" required error={errors.mdaId}>
-                <Select
-                  value={value.mdaId ?? ""}
-                  onChange={(e) => setField("mdaId", e.target.value)}
-                  invalid={!!errors.mdaId}
-                >
-                  <option value="">— Select —</option>
-                  {state.mdas.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Project (optional)">
-                <Select
-                  value={value.projectId ?? ""}
-                  onChange={(e) =>
-                    setField("projectId", e.target.value || undefined)
-                  }
-                >
-                  <option value="">— None —</option>
-                  {projectsForMda.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="Unit" required error={errors.unitId}>
-                <Select
-                  value={value.unitId ?? ""}
-                  onChange={(e) => setField("unitId", e.target.value)}
-                  invalid={!!errors.unitId}
-                >
-                  <option value="">— Select —</option>
-                  {state.units.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} ({u.symbol})
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Baseline">
-                <Input
-                  type="number"
-                  value={value.baseline ?? 0}
-                  onChange={(e) => setField("baseline", Number(e.target.value))}
-                />
-              </Field>
-              <Field label="Target" required error={errors.target}>
-                <Input
-                  type="number"
-                  value={value.target ?? 0}
-                  onChange={(e) => setField("target", Number(e.target.value))}
-                  invalid={!!errors.target}
-                />
-              </Field>
-            </div>
-            <Field label="Period" required error={errors.periodId}>
+      renderForm={({ value, setField, errors }) => (
+        <>
+          <Field label="Target name" required error={errors.targetName}>
+            <Input
+              value={value.targetName ?? ""}
+              onChange={(e) => setField("targetName", e.target.value)}
+              invalid={!!errors.targetName}
+              maxLength={256}
+              placeholder="e.g. Children immunised"
+            />
+          </Field>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Link to report" error={errors.reportId}>
               <Select
-                value={value.periodId ?? ""}
-                onChange={(e) => setField("periodId", e.target.value)}
-                invalid={!!errors.periodId}
+                value={value.reportId ?? ""}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setField("reportId", n || null);
+                  if (n) setField("projectId", null);
+                }}
+                invalid={!!errors.reportId}
               >
-                {state.reportingPeriods.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
+                <option value="">— None —</option>
+                {reports.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.reportName} (#{r.id})
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Description">
-              <Textarea
-                value={value.description ?? ""}
-                onChange={(e) => setField("description", e.target.value)}
+            <Field label="Link to project">
+              <Select
+                value={value.projectId ?? ""}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  setField("projectId", n || null);
+                  if (n) setField("reportId", null);
+                }}
+              >
+                <option value="">— None —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.projectName} (#{p.id})
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Field label="Value">
+              <Input
+                type="number"
+                step="any"
+                value={value.value ?? ""}
+                onChange={(e) =>
+                  setField("value", Number(e.target.value) || 0)
+                }
               />
             </Field>
-          </>
-        );
-      }}
+            <Field label="Unit ID">
+              <Input
+                type="number"
+                min={1}
+                value={value.unitId ?? ""}
+                onChange={(e) =>
+                  setField("unitId", Number(e.target.value) || undefined)
+                }
+                placeholder="1"
+              />
+            </Field>
+            <Field label="Frequency" required error={errors.frequency}>
+              <Select
+                value={value.frequency ?? ""}
+                onChange={(e) => setField("frequency", e.target.value)}
+                invalid={!!errors.frequency}
+              >
+                <option value="">— Select —</option>
+                {FREQUENCIES.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field label="Reporting period ID">
+              <Input
+                type="number"
+                min={1}
+                value={value.reportingPeriodId ?? ""}
+                onChange={(e) =>
+                  setField(
+                    "reportingPeriodId",
+                    Number(e.target.value) || undefined,
+                  )
+                }
+                placeholder="1"
+              />
+            </Field>
+            <Field label="LGA ID">
+              <Input
+                type="number"
+                min={1}
+                value={value.lgaId ?? ""}
+                onChange={(e) =>
+                  setField("lgaId", Number(e.target.value) || undefined)
+                }
+                placeholder="1"
+              />
+            </Field>
+          </div>
+        </>
+      )}
     />
   );
+}
+
+function prepare(v: CreateTargetDto): CreateTargetDto {
+  return {
+    ...v,
+    reportId: v.reportId || null,
+    projectId: v.projectId || null,
+    value: Number(v.value ?? 0),
+  };
 }

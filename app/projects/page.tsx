@@ -1,180 +1,152 @@
 "use client";
 
 import { Briefcase } from "lucide-react";
-import { ResourcePage } from "@/components/resource/ResourcePage";
+import { RemoteResourcePage } from "@/components/resource/RemoteResourcePage";
 import { Field, Input, Select, Textarea } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { useStore } from "@/lib/store";
-import type { Project, ProjectStatus } from "@/lib/types";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { ProjectsApi } from "@/lib/api/endpoints";
+import type { CreateProjectDto, ProjectDto } from "@/lib/api/types";
+import { formatDate } from "@/lib/utils";
 
-const STATUS_TONE: Record<ProjectStatus, "brand" | "info" | "success" | "warning" | "danger" | "neutral"> = {
-  planned: "info",
-  ongoing: "brand",
-  completed: "success",
-  on_hold: "warning",
-  cancelled: "danger",
-};
+const STATUSES = [
+  "Planned",
+  "Ongoing",
+  "Completed",
+  "OnHold",
+  "Cancelled",
+];
 
-const STATUS_LABEL: Record<ProjectStatus, string> = {
-  planned: "Planned",
-  ongoing: "Ongoing",
-  completed: "Completed",
-  on_hold: "On hold",
-  cancelled: "Cancelled",
-};
+function toInputDate(iso?: string) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toISOString().slice(0, 10);
+}
+
+function toIsoDate(val?: string) {
+  if (!val) return undefined;
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
 
 export default function ProjectsPage() {
-  const { state } = useStore();
   return (
-    <ResourcePage<Project>
-      collection="projects"
+    <RemoteResourcePage<ProjectDto, CreateProjectDto>
       icon={<Briefcase className="h-5 w-5" />}
       title="Projects"
-      subtitle="Programmes and initiatives being delivered by MDAs."
+      subtitle="Programmes and projects tracked across departments."
       singular="Project"
-      plural="Projects"
-      searchKeys={["name", "code", "description"]}
       modalSize="lg"
+      fetchPage={({ page, pageSize }) =>
+        ProjectsApi.list({ page, pageSize })
+      }
+      create={(v) => ProjectsApi.create(normalize(v))}
+      update={(id, v) => ProjectsApi.update(id, normalize(v))}
+      remove={(id) => ProjectsApi.remove(id)}
+      toFormValue={(r) => ({
+        projectName: r.projectName ?? "",
+        departmentId: r.departmentId,
+        description: r.description ?? "",
+        startDate: toInputDate(r.startDate),
+        endDate: toInputDate(r.endDate),
+        status: r.status ?? "Planned",
+      })}
+      defaultValue={() => ({
+        projectName: "",
+        status: "Planned",
+      })}
+      validate={(v) => {
+        const e: Record<string, string> = {};
+        if (!v.projectName?.trim())
+          e.projectName = "Project name is required";
+        if (!v.status) e.status = "Status is required";
+        if (v.startDate && v.endDate && v.endDate < v.startDate)
+          e.endDate = "End date must be after start date";
+        return e;
+      }}
       columns={[
+        {
+          key: "id",
+          header: "ID",
+          width: "80px",
+          render: (r) => <span className="muted tabular-nums">#{r.id}</span>,
+          sortBy: (r) => Number(r.id),
+        },
         {
           key: "name",
           header: "Project",
-          sortBy: (r) => r.name,
           render: (r) => (
             <div>
-              <div className="font-medium">{r.name}</div>
-              {r.code ? <div className="text-xs muted">{r.code}</div> : null}
+              <div className="font-medium">{r.projectName ?? "—"}</div>
+              {r.description ? (
+                <div className="mt-0.5 line-clamp-1 text-xs muted">
+                  {r.description}
+                </div>
+              ) : null}
             </div>
           ),
+          sortBy: (r) => r.projectName ?? "",
         },
         {
-          key: "mda",
-          header: "MDA",
-          sortBy: (r) => state.mdas.find((m) => m.id === r.mdaId)?.name,
+          key: "dept",
+          header: "Dept.",
+          hidden: "md",
+          render: (r) => <Badge tone="brand">#{r.departmentId}</Badge>,
+        },
+        {
+          key: "dates",
+          header: "Dates",
+          hidden: "lg",
           render: (r) => (
-            <Badge tone="brand">
-              {state.mdas.find((m) => m.id === r.mdaId)?.code ?? "—"}
-            </Badge>
+            <span className="muted text-xs">
+              {formatDate(r.startDate)} → {formatDate(r.endDate)}
+            </span>
           ),
         },
         {
           key: "status",
           header: "Status",
-          sortBy: (r) => r.status,
           render: (r) => (
-            <Badge tone={STATUS_TONE[r.status]} dot>
-              {STATUS_LABEL[r.status]}
-            </Badge>
+            <Badge tone={statusTone(r.status)}>{r.status ?? "—"}</Badge>
           ),
-        },
-        {
-          key: "dates",
-          header: "Timeline",
-          hidden: "md",
-          sortBy: (r) => r.startDate,
-          render: (r) =>
-            r.startDate || r.endDate ? (
-              <span className="muted text-xs">
-                {formatDate(r.startDate)} → {formatDate(r.endDate)}
-              </span>
-            ) : (
-              "—"
-            ),
-        },
-        {
-          key: "budget",
-          header: "Budget",
-          align: "right",
-          sortBy: (r) => r.budget ?? 0,
-          render: (r) => (
-            <span className="tabular-nums">{formatCurrency(r.budget)}</span>
-          ),
-        },
-        {
-          key: "lgas",
-          header: "LGAs",
-          hidden: "lg",
-          render: (r) => r.lgaIds.length,
+          sortBy: (r) => r.status ?? "",
         },
       ]}
-      defaultValue={() => ({
-        name: "",
-        code: "",
-        mdaId: state.mdas[0]?.id,
-        description: "",
-        status: "planned",
-        startDate: "",
-        endDate: "",
-        budget: 0,
-        lgaIds: [],
-      })}
-      validate={(v) => {
-        const e: Record<string, string> = {};
-        if (!v.name?.trim()) e.name = "Name is required";
-        if (!v.mdaId) e.mdaId = "MDA is required";
-        if (v.startDate && v.endDate && v.startDate > v.endDate)
-          e.endDate = "End date must be after start";
-        return e;
-      }}
-      canDelete={(r) =>
-        state.projectFundings.some((f) => f.projectId === r.id)
-          ? "Remove project funding first."
-          : state.targets.some((t) => t.projectId === r.id)
-            ? "Remove project targets first."
-            : null
-      }
       renderForm={({ value, setField, errors }) => (
         <>
+          <Field label="Project name" required error={errors.projectName}>
+            <Input
+              value={value.projectName ?? ""}
+              onChange={(e) => setField("projectName", e.target.value)}
+              invalid={!!errors.projectName}
+              maxLength={256}
+              placeholder="e.g. PHC Revitalisation Programme"
+            />
+          </Field>
+          <Field label="Description">
+            <Textarea
+              value={value.description ?? ""}
+              onChange={(e) => setField("description", e.target.value)}
+              rows={3}
+              maxLength={2000}
+            />
+          </Field>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <div className="sm:col-span-2">
-              <Field label="Name" required error={errors.name}>
-                <Input
-                  value={value.name ?? ""}
-                  onChange={(e) => setField("name", e.target.value)}
-                  invalid={!!errors.name}
-                />
-              </Field>
-            </div>
-            <Field label="Code">
+            <Field label="Department ID">
               <Input
-                value={value.code ?? ""}
-                onChange={(e) => setField("code", e.target.value.toUpperCase())}
-                placeholder="HLTH-2024-01"
+                type="number"
+                min={1}
+                value={value.departmentId ?? ""}
+                onChange={(e) =>
+                  setField(
+                    "departmentId",
+                    Number(e.target.value) || undefined,
+                  )
+                }
+                placeholder="1"
               />
             </Field>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field label="MDA" required error={errors.mdaId}>
-              <Select
-                value={value.mdaId ?? ""}
-                onChange={(e) => setField("mdaId", e.target.value)}
-                invalid={!!errors.mdaId}
-              >
-                <option value="">— Select —</option>
-                {state.mdas.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Status">
-              <Select
-                value={value.status ?? "planned"}
-                onChange={(e) =>
-                  setField("status", e.target.value as ProjectStatus)
-                }
-              >
-                {Object.entries(STATUS_LABEL).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <Field label="Start date">
               <Input
                 type="date"
@@ -190,43 +162,49 @@ export default function ProjectsPage() {
                 invalid={!!errors.endDate}
               />
             </Field>
-            <Field label="Budget (₦)">
-              <Input
-                type="number"
-                min={0}
-                value={value.budget ?? ""}
-                onChange={(e) => setField("budget", Number(e.target.value))}
-              />
-            </Field>
           </div>
-          <Field label="LGAs covered">
-            <select
-              multiple
-              value={value.lgaIds ?? []}
-              onChange={(e) =>
-                setField(
-                  "lgaIds",
-                  Array.from(e.target.selectedOptions).map((o) => o.value),
-                )
-              }
-              className="block w-full rounded-lg border bg-[var(--surface)] p-2 text-sm min-h-[140px]"
+          <Field label="Status" required error={errors.status}>
+            <Select
+              value={value.status ?? ""}
+              onChange={(e) => setField("status", e.target.value)}
+              invalid={!!errors.status}
             >
-              {state.lgas.map((l) => (
-                <option key={l.id} value={l.id}>
-                  {l.name} ({l.state})
+              <option value="">— Select —</option>
+              {STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {s}
                 </option>
               ))}
-            </select>
-          </Field>
-          <Field label="Description">
-            <Textarea
-              value={value.description ?? ""}
-              onChange={(e) => setField("description", e.target.value)}
-              rows={3}
-            />
+            </Select>
           </Field>
         </>
       )}
     />
   );
+}
+
+function normalize(v: CreateProjectDto): CreateProjectDto {
+  return {
+    ...v,
+    startDate: toIsoDate(v.startDate),
+    endDate: toIsoDate(v.endDate),
+  };
+}
+
+function statusTone(
+  s: string | null,
+): "success" | "info" | "warning" | "danger" | "neutral" {
+  switch ((s ?? "").toLowerCase()) {
+    case "completed":
+      return "success";
+    case "ongoing":
+      return "info";
+    case "onhold":
+    case "on_hold":
+      return "warning";
+    case "cancelled":
+      return "danger";
+    default:
+      return "neutral";
+  }
 }

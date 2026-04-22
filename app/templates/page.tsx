@@ -1,8 +1,8 @@
 "use client";
 
-import { FileCode, Pencil, Plus, Trash2 } from "lucide-react";
+import { FileCode, Pencil, Plus, Trash2, RefreshCcw } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Field, Input, Select, Textarea } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -12,140 +12,180 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { IconButton, RowActions } from "@/components/ui/RowActions";
 import { Toolbar } from "@/components/ui/Toolbar";
 import { useModal } from "@/lib/modal";
-import { useStore } from "@/lib/store";
 import { useToast } from "@/lib/toast";
-import type { DynamicTemplate, FieldType, TemplateField } from "@/lib/types";
-import { slugify, uid } from "@/lib/utils";
+import { TemplatesApi } from "@/lib/api/endpoints";
+import { useProjects, useReports } from "@/lib/api/hooks";
+import type {
+  CreateTemplateFieldDto,
+  TemplateDto,
+  TemplateFieldDto,
+} from "@/lib/api/types";
 
-const FIELD_TYPES: { value: FieldType; label: string }[] = [
-  { value: "text", label: "Short text" },
-  { value: "textarea", label: "Long text" },
-  { value: "number", label: "Number" },
-  { value: "currency", label: "Currency" },
-  { value: "date", label: "Date" },
-  { value: "select", label: "Select (single)" },
-  { value: "multiselect", label: "Select (multiple)" },
-  { value: "checkbox", label: "Checkbox" },
-  { value: "file", label: "File reference" },
+const FIELD_TYPES = [
+  "text",
+  "textarea",
+  "number",
+  "currency",
+  "date",
+  "select",
+  "multiselect",
+  "checkbox",
+  "file",
 ];
 
+const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Annually"];
+
+const TEMPLATE_TYPES = ["Report", "Project", "Generic"];
+
 export default function TemplatesPage() {
-  const { state, add, update, remove } = useStore();
   const modal = useModal();
   const toast = useToast();
+  const { data: reports } = useReports();
+  const { data: projects } = useProjects();
+
+  const [templates, setTemplates] = useState<TemplateDto[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(
-    state.templates[0]?.id ?? null,
-  );
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await TemplatesApi.list({ page: 1, pageSize: 100 });
+      setTemplates(res.items ?? []);
+      setSelectedId((prev) =>
+        prev && (res.items ?? []).some((t) => t.id === prev)
+          ? prev
+          : (res.items?.[0]?.id ?? null),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load templates");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   const filtered = useMemo(
     () =>
-      state.templates.filter(
-        (t) =>
-          t.name.toLowerCase().includes(query.toLowerCase()) ||
-          (t.description ?? "").toLowerCase().includes(query.toLowerCase()),
+      templates.filter((t) =>
+        (t.name ?? "").toLowerCase().includes(query.toLowerCase()),
       ),
-    [state.templates, query],
+    [templates, query],
   );
 
-  const selected =
-    state.templates.find((t) => t.id === selectedId) ?? state.templates[0] ?? null;
+  const selected = templates.find((t) => t.id === selectedId) ?? null;
 
-  function openTemplateForm(existing?: DynamicTemplate) {
+  async function refreshOne(id: number) {
+    try {
+      const fresh = await TemplatesApi.get(id);
+      setTemplates((prev) => prev.map((t) => (t.id === id ? fresh : t)));
+    } catch {
+      reload();
+    }
+  }
+
+  function openTemplateForm(existing?: TemplateDto) {
     modal.open({
       title: existing ? "Edit template" : "New template",
       size: "md",
       body: (
         <TemplateMetaForm
-          initial={existing}
-          reportTypes={state.reportTypes}
+          initial={existing ?? null}
+          reports={reports}
+          projects={projects}
           onCancel={() => modal.close()}
-          onSave={(meta) => {
-            if (existing) {
-              update("templates", existing.id, meta);
-              toast.success("Template updated");
-            } else {
-              const created = add("templates", { ...meta, fields: [] } as never);
-              setSelectedId(created.id);
-              toast.success("Template created");
+          onSave={async (meta) => {
+            try {
+              if (existing) {
+                await TemplatesApi.update(existing.id, meta);
+                toast.success("Template updated");
+              } else {
+                const created = await TemplatesApi.create(meta);
+                setSelectedId(created.id);
+                toast.success("Template created");
+              }
+              modal.close();
+              await reload();
+            } catch (e) {
+              toast.error(
+                "Save failed",
+                e instanceof Error ? e.message : "Unexpected error",
+              );
             }
-            modal.close();
           }}
         />
       ),
     });
   }
 
-  async function deleteTemplate(t: DynamicTemplate) {
-    const referencedBy = state.reportTypes.find((rt) => rt.templateId === t.id);
-    if (referencedBy) {
-      toast.warn("Cannot delete", `In use by report type "${referencedBy.name}".`);
-      return;
-    }
+  async function deleteTemplate(t: TemplateDto) {
     const ok = await modal.confirm({
-      title: `Delete "${t.name}"?`,
+      title: `Delete "${t.name ?? "template"}"?`,
       message: "This will remove the template definition.",
       tone: "danger",
     });
     if (!ok) return;
-    remove("templates", t.id);
-    if (selectedId === t.id) setSelectedId(null);
-    toast.success("Template deleted");
+    try {
+      await TemplatesApi.remove(t.id);
+      if (selectedId === t.id) setSelectedId(null);
+      toast.success("Template deleted");
+      await reload();
+    } catch (e) {
+      toast.error(
+        "Delete failed",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    }
   }
 
-  function openFieldEditor(
-    templateId: string,
-    existing?: TemplateField,
-    atIndex?: number,
-  ) {
+  function openFieldEditor(templateId: number) {
     modal.open({
-      title: existing ? "Edit field" : "New field",
+      title: "New field",
       size: "md",
       body: (
         <FieldForm
-          initial={existing}
           onCancel={() => modal.close()}
-          onSave={(field) => {
-            const tpl = state.templates.find((t) => t.id === templateId);
-            if (!tpl) return;
-            const fields = [...tpl.fields];
-            if (existing) {
-              const idx = fields.findIndex((f) => f.id === existing.id);
-              if (idx >= 0) fields[idx] = { ...existing, ...field } as TemplateField;
-            } else {
-              const newField: TemplateField = { id: uid(), ...field } as TemplateField;
-              if (atIndex === undefined) fields.push(newField);
-              else fields.splice(atIndex, 0, newField);
+          onSave={async (field) => {
+            try {
+              await TemplatesApi.addField(templateId, field);
+              toast.success("Field added");
+              modal.close();
+              await refreshOne(templateId);
+            } catch (e) {
+              toast.error(
+                "Save failed",
+                e instanceof Error ? e.message : "Unexpected error",
+              );
             }
-            update("templates", templateId, { fields });
-            toast.success(existing ? "Field updated" : "Field added");
-            modal.close();
           }}
         />
       ),
     });
   }
 
-  function removeField(templateId: string, fieldId: string) {
-    const tpl = state.templates.find((t) => t.id === templateId);
-    if (!tpl) return;
-    update("templates", templateId, {
-      fields: tpl.fields.filter((f) => f.id !== fieldId),
+  async function removeField(templateId: number, fieldId: number) {
+    const ok = await modal.confirm({
+      title: "Remove field?",
+      message: "This will detach the field from the template.",
+      tone: "danger",
     });
-    toast.success("Field removed");
-  }
-
-  function moveField(templateId: string, fieldId: string, dir: -1 | 1) {
-    const tpl = state.templates.find((t) => t.id === templateId);
-    if (!tpl) return;
-    const idx = tpl.fields.findIndex((f) => f.id === fieldId);
-    if (idx < 0) return;
-    const next = idx + dir;
-    if (next < 0 || next >= tpl.fields.length) return;
-    const arr = [...tpl.fields];
-    const [item] = arr.splice(idx, 1);
-    arr.splice(next, 0, item);
-    update("templates", templateId, { fields: arr });
+    if (!ok) return;
+    try {
+      await TemplatesApi.removeField(templateId, fieldId);
+      toast.success("Field removed");
+      await refreshOne(templateId);
+    } catch (e) {
+      toast.error(
+        "Delete failed",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    }
   }
 
   return (
@@ -155,14 +195,30 @@ export default function TemplatesPage() {
         title="Dynamic Templates"
         subtitle="Design reusable forms for capturing report data."
         actions={
-          <Button
-            leftIcon={<Plus className="h-4 w-4" />}
-            onClick={() => openTemplateForm()}
-          >
-            New template
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              leftIcon={<RefreshCcw className="h-4 w-4" />}
+              onClick={reload}
+              loading={loading}
+            >
+              Refresh
+            </Button>
+            <Button
+              leftIcon={<Plus className="h-4 w-4" />}
+              onClick={() => openTemplateForm()}
+            >
+              New template
+            </Button>
+          </div>
         }
       />
+
+      {error ? (
+        <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          {error}
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px,1fr]">
         <Card className="lg:sticky lg:top-[140px] lg:h-fit">
@@ -177,8 +233,10 @@ export default function TemplatesPage() {
           {filtered.length === 0 ? (
             <div className="p-6">
               <EmptyState
-                title="No templates"
-                message="Create your first template to build dynamic forms."
+                title={loading ? "Loading…" : "No templates"}
+                message={
+                  loading ? "Fetching templates…" : "Create your first template."
+                }
               />
             </div>
           ) : (
@@ -196,15 +254,16 @@ export default function TemplatesPage() {
                   >
                     <div className="flex w-full items-center justify-between gap-2">
                       <span className="truncate text-sm font-medium">
-                        {t.name}
+                        {t.name ?? `Template #${t.id}`}
                       </span>
-                      <Badge tone="neutral">{t.fields.length} fields</Badge>
+                      <Badge tone="neutral">
+                        {(t.fields?.length ?? 0)} fields
+                      </Badge>
                     </div>
-                    {t.description ? (
-                      <span className="line-clamp-1 text-xs muted">
-                        {t.description}
-                      </span>
-                    ) : null}
+                    <div className="flex items-center gap-1 text-[11px] muted">
+                      <span>#{t.id}</span>
+                      {t.type ? <span>· {t.type}</span> : null}
+                    </div>
                   </button>
                 </li>
               ))}
@@ -216,15 +275,19 @@ export default function TemplatesPage() {
           {selected ? (
             <Card>
               <CardHeader
-                title={selected.name}
-                subtitle={selected.description || "Define the fields captured by this form."}
+                title={selected.name ?? `Template #${selected.id}`}
+                subtitle={
+                  selected.type
+                    ? `Type: ${selected.type}`
+                    : "Define the fields captured by this form."
+                }
                 actions={
                   <div className="flex items-center gap-2">
                     <Link
                       href={`/capture?template=${selected.id}`}
                       className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-[var(--surface-2)]"
                     >
-                      Try it
+                      Capture data
                     </Link>
                     <IconButton
                       onClick={() => openTemplateForm(selected)}
@@ -255,7 +318,7 @@ export default function TemplatesPage() {
                     Add field
                   </Button>
                 </div>
-                {selected.fields.length === 0 ? (
+                {(selected.fields?.length ?? 0) === 0 ? (
                   <EmptyState
                     className="m-4"
                     title="No fields yet"
@@ -271,46 +334,33 @@ export default function TemplatesPage() {
                   />
                 ) : (
                   <ul className="divide-y">
-                    {selected.fields.map((f, i) => (
+                    {(selected.fields ?? []).map((f) => (
                       <li
                         key={f.id}
                         className="group flex flex-col gap-2 px-4 py-3 md:flex-row md:items-center md:justify-between md:px-5"
                       >
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">{f.label}</span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium">
+                              {f.fieldName ?? `Field #${f.id}`}
+                            </span>
                             {f.required ? (
                               <Badge tone="danger">required</Badge>
                             ) : null}
-                            <Badge tone="neutral">{fieldTypeLabel(f.type)}</Badge>
-                          </div>
-                          <div className="mt-0.5 text-xs muted">
-                            key: <code className="rounded bg-[var(--surface-2)] px-1">{f.key}</code>
-                            {f.options?.length ? (
-                              <span> • {f.options.length} options</span>
+                            <Badge tone="neutral">{f.fieldType ?? "—"}</Badge>
+                            {f.frequency ? (
+                              <Badge tone="info">{f.frequency}</Badge>
                             ) : null}
                           </div>
+                          <div className="mt-0.5 text-xs muted">
+                            #{f.id}
+                            {f.unitId ? ` · unit #${f.unitId}` : ""}
+                            {f.options ? ` · options: ${f.options}` : ""}
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          <IconButton
-                            title="Move up"
-                            onClick={() => moveField(selected.id, f.id, -1)}
-                            disabled={i === 0}
-                          >
-                            ↑
-                          </IconButton>
-                          <IconButton
-                            title="Move down"
-                            onClick={() => moveField(selected.id, f.id, 1)}
-                            disabled={i === selected.fields.length - 1}
-                          >
-                            ↓
-                          </IconButton>
-                          <RowActions
-                            onEdit={() => openFieldEditor(selected.id, f)}
-                            onDelete={() => removeField(selected.id, f.id)}
-                          />
-                        </div>
+                        <RowActions
+                          onDelete={() => removeField(selected.id, f.id)}
+                        />
                       </li>
                     ))}
                   </ul>
@@ -337,37 +387,50 @@ export default function TemplatesPage() {
   );
 }
 
-function fieldTypeLabel(t: FieldType): string {
-  return FIELD_TYPES.find((x) => x.value === t)?.label ?? t;
-}
-
 function TemplateMetaForm({
   initial,
-  reportTypes,
+  reports,
+  projects,
   onCancel,
   onSave,
 }: {
-  initial?: DynamicTemplate;
-  reportTypes: { id: string; name: string }[];
+  initial: TemplateDto | null;
+  reports: { id: number; reportName: string | null }[];
+  projects: { id: number; projectName: string | null }[];
   onCancel: () => void;
-  onSave: (
-    v: Pick<DynamicTemplate, "name" | "description" | "reportTypeId">,
-  ) => void;
+  onSave: (v: {
+    name: string;
+    type: string;
+    reportId?: number | null;
+    projectId?: number | null;
+  }) => Promise<void>;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [description, setDescription] = useState(initial?.description ?? "");
-  const [reportTypeId, setReportTypeId] = useState<string | undefined>(
-    initial?.reportTypeId,
+  const [type, setType] = useState(initial?.type ?? "Report");
+  const [reportId, setReportId] = useState<number | "">(initial?.reportId ?? "");
+  const [projectId, setProjectId] = useState<number | "">(
+    initial?.projectId ?? "",
   );
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
       setError("Name is required");
       return;
     }
-    onSave({ name: name.trim(), description: description.trim(), reportTypeId });
+    setSubmitting(true);
+    try {
+      await onSave({
+        name: name.trim(),
+        type,
+        reportId: reportId || null,
+        projectId: projectId || null,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -378,155 +441,201 @@ function TemplateMetaForm({
           onChange={(e) => setName(e.target.value)}
           placeholder="e.g. PHC Monthly Service"
           autoFocus
+          maxLength={256}
         />
       </Field>
-      <Field label="Description">
-        <Textarea
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-      </Field>
-      <Field label="Used by report type" hint="Optional default report type mapping.">
-        <Select
-          value={reportTypeId ?? ""}
-          onChange={(e) => setReportTypeId(e.target.value || undefined)}
-        >
-          <option value="">— None —</option>
-          {reportTypes.map((rt) => (
-            <option key={rt.id} value={rt.id}>
-              {rt.name}
+      <Field label="Template type" required>
+        <Select value={type} onChange={(e) => setType(e.target.value)}>
+          {TEMPLATE_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
             </option>
           ))}
         </Select>
       </Field>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Linked report">
+          <Select
+            value={reportId}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setReportId(n || "");
+              if (n) setProjectId("");
+            }}
+          >
+            <option value="">— None —</option>
+            {reports.map((r) => (
+              <option key={r.id} value={r.id}>
+                {r.reportName} (#{r.id})
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Linked project">
+          <Select
+            value={projectId}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              setProjectId(n || "");
+              if (n) setReportId("");
+            }}
+          >
+            <option value="">— None —</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.projectName} (#{p.id})
+              </option>
+            ))}
+          </Select>
+        </Field>
+      </div>
       <div className="flex justify-end gap-2 border-t pt-4">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={submitting}
+        >
           Cancel
         </Button>
-        <Button type="submit">{initial ? "Save" : "Create"}</Button>
+        <Button type="submit" loading={submitting}>
+          {initial ? "Save" : "Create"}
+        </Button>
       </div>
     </form>
   );
 }
 
 function FieldForm({
-  initial,
   onCancel,
   onSave,
 }: {
-  initial?: TemplateField;
   onCancel: () => void;
-  onSave: (v: Omit<TemplateField, "id">) => void;
+  onSave: (v: CreateTemplateFieldDto) => Promise<void>;
 }) {
-  const [label, setLabel] = useState(initial?.label ?? "");
-  const [key, setKey] = useState(initial?.key ?? "");
-  const [type, setType] = useState<FieldType>(initial?.type ?? "text");
-  const [required, setRequired] = useState(initial?.required ?? false);
-  const [placeholder, setPlaceholder] = useState(initial?.placeholder ?? "");
-  const [help, setHelp] = useState(initial?.help ?? "");
-  const [optionsText, setOptionsText] = useState(
-    (initial?.options ?? []).join("\n"),
-  );
+  const [fieldName, setFieldName] = useState("");
+  const [fieldType, setFieldType] = useState("text");
+  const [required, setRequired] = useState(false);
+  const [unitId, setUnitId] = useState<string>("");
+  const [options, setOptions] = useState("");
+  const [frequency, setFrequency] = useState("Monthly");
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     const errs: Record<string, string> = {};
-    if (!label.trim()) errs.label = "Label is required";
-    const finalKey = (key || slugify(label)).trim();
-    if (!finalKey) errs.key = "Key is required";
-    if ((type === "select" || type === "multiselect") && !optionsText.trim())
-      errs.options = "Add at least one option";
+    if (!fieldName.trim()) errs.fieldName = "Name is required";
+    if (!fieldType) errs.fieldType = "Type is required";
+    if (!frequency) errs.frequency = "Frequency is required";
     if (Object.keys(errs).length) {
       setErrors(errs);
       return;
     }
-    onSave({
-      label: label.trim(),
-      key: finalKey,
-      type,
-      required,
-      placeholder: placeholder.trim() || undefined,
-      help: help.trim() || undefined,
-      options:
-        type === "select" || type === "multiselect"
-          ? optionsText
-              .split("\n")
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : undefined,
-    });
+    setSubmitting(true);
+    try {
+      await onSave({
+        fieldName: fieldName.trim(),
+        fieldType,
+        required,
+        frequency,
+        unitId: unitId ? Number(unitId) : null,
+        options: options.trim() || null,
+      });
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  const showOptions = type === "select" || type === "multiselect";
+  const showOptions = fieldType === "select" || fieldType === "multiselect";
 
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Label" required error={errors.label}>
+        <Field label="Field name" required error={errors.fieldName}>
           <Input
-            value={label}
-            onChange={(e) => {
-              setLabel(e.target.value);
-              if (!initial && !key) setKey(slugify(e.target.value));
-            }}
+            value={fieldName}
+            onChange={(e) => setFieldName(e.target.value)}
             placeholder="e.g. Patients treated"
-            invalid={!!errors.label}
+            invalid={!!errors.fieldName}
             autoFocus
+            maxLength={128}
           />
         </Field>
-        <Field label="Field key" required error={errors.key} hint="Used as a JSON property.">
-          <Input
-            value={key}
-            onChange={(e) => setKey(slugify(e.target.value))}
-            placeholder="patients_treated"
-            invalid={!!errors.key}
-          />
-        </Field>
-      </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Type">
-          <Select value={type} onChange={(e) => setType(e.target.value as FieldType)}>
-            {FIELD_TYPES.map((ft) => (
-              <option key={ft.value} value={ft.value}>
-                {ft.label}
+        <Field label="Field type" required error={errors.fieldType}>
+          <Select
+            value={fieldType}
+            onChange={(e) => setFieldType(e.target.value)}
+            invalid={!!errors.fieldType}
+          >
+            {FIELD_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Required?">
-          <label className="inline-flex h-10 items-center gap-2">
-            <input
-              type="checkbox"
-              checked={required}
-              onChange={(e) => setRequired(e.target.checked)}
-              className="h-4 w-4"
-            />
-            <span className="text-sm">Must be filled in</span>
-          </label>
+      </div>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <Field label="Unit ID">
+          <Input
+            type="number"
+            min={1}
+            value={unitId}
+            onChange={(e) => setUnitId(e.target.value)}
+            placeholder="Optional"
+          />
+        </Field>
+        <Field label="Frequency" required error={errors.frequency}>
+          <Select
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value)}
+            invalid={!!errors.frequency}
+          >
+            {FREQUENCIES.map((f) => (
+              <option key={f} value={f}>
+                {f}
+              </option>
+            ))}
+          </Select>
         </Field>
       </div>
-      <Field label="Placeholder">
-        <Input value={placeholder} onChange={(e) => setPlaceholder(e.target.value)} />
-      </Field>
-      <Field label="Helper text">
-        <Input value={help} onChange={(e) => setHelp(e.target.value)} />
+      <Field label="Required?">
+        <label className="inline-flex h-10 items-center gap-2">
+          <input
+            type="checkbox"
+            checked={required}
+            onChange={(e) => setRequired(e.target.checked)}
+            className="h-4 w-4"
+          />
+          <span className="text-sm">Must be filled in</span>
+        </label>
       </Field>
       {showOptions ? (
-        <Field label="Options" error={errors.options} hint="One per line.">
+        <Field
+          label="Options"
+          hint="Comma-separated list of values"
+        >
           <Textarea
-            value={optionsText}
-            onChange={(e) => setOptionsText(e.target.value)}
-            rows={5}
-            placeholder="Option 1\nOption 2\nOption 3"
+            value={options}
+            onChange={(e) => setOptions(e.target.value)}
+            rows={3}
+            placeholder="Yes, No, N/A"
           />
         </Field>
       ) : null}
       <div className="flex justify-end gap-2 border-t pt-4">
-        <Button type="button" variant="outline" onClick={onCancel}>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={submitting}
+        >
           Cancel
         </Button>
-        <Button type="submit">{initial ? "Save field" : "Add field"}</Button>
+        <Button type="submit" loading={submitting}>
+          Add field
+        </Button>
       </div>
     </form>
   );

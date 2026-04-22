@@ -1,18 +1,19 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { ClipboardEdit, Save, Send } from "lucide-react";
+import { ClipboardEdit, Save, CheckCircle2 } from "lucide-react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Field, Input, Select, Textarea } from "@/components/ui/Input";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
-import { useStore } from "@/lib/store";
 import { useToast } from "@/lib/toast";
-import type { TemplateField } from "@/lib/types";
-import { formatCurrency, nowISO } from "@/lib/utils";
+import { useAuth } from "@/lib/auth";
+import { TemplateDataApi, TemplatesApi } from "@/lib/api/endpoints";
+import { useTargets, useTemplates } from "@/lib/api/hooks";
+import type { TemplateDto, TemplateFieldDto } from "@/lib/api/types";
 
 export default function CapturePage() {
   return (
@@ -27,106 +28,131 @@ export default function CapturePage() {
 }
 
 function CaptureInner() {
-  const { state, add } = useStore();
   const router = useRouter();
   const params = useSearchParams();
   const toast = useToast();
+  const { session } = useAuth();
+  const { data: templates, loading: tplLoading } = useTemplates();
+  const { data: targets } = useTargets();
 
-  const initialTemplateId =
-    params.get("template") ?? state.templates[0]?.id ?? "";
+  const initialTemplateId = params.get("template") ?? "";
   const [templateId, setTemplateId] = useState<string>(initialTemplateId);
+  const [template, setTemplate] = useState<TemplateDto | null>(null);
+  const [tplFetching, setTplFetching] = useState(false);
 
-  useEffect(() => {
-    if (!templateId && state.templates.length) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setTemplateId(state.templates[0].id);
-    }
-  }, [state.templates, templateId]);
-
-  const template = state.templates.find((t) => t.id === templateId) ?? null;
-
-  const defaultTitle = useMemo(() => {
-    if (!template) return "";
-    const period = state.reportingPeriods.find(
-      (p) => p.id === state.activePeriodId,
-    );
-    return `${template.name}${period ? ` – ${period.name}` : ""}`;
-  }, [template, state.activePeriodId, state.reportingPeriods]);
-
-  const [title, setTitle] = useState(defaultTitle);
-  const [mdaId, setMdaId] = useState(state.mdas[0]?.id ?? "");
-  const [typeId, setTypeId] = useState<string>(template?.reportTypeId ?? "");
-  const [periodId, setPeriodId] = useState<string>(
-    state.activePeriodId ?? state.reportingPeriods[0]?.id ?? "",
-  );
-  const [values, setValues] = useState<Record<string, unknown>>({});
-  const [notes, setNotes] = useState("");
+  const [targetId, setTargetId] = useState<string>("");
+  const [reportingPeriodId, setReportingPeriodId] = useState<string>("");
+  const [lgaId, setLgaId] = useState<string>("");
+  const [values, setValues] = useState<Record<number, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    setTitle(defaultTitle);
-    setTypeId(template?.reportTypeId ?? "");
-    setValues({});
-    setErrors({});
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [templateId, defaultTitle, template]);
+    if (!templateId && templates.length > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTemplateId(String(templates[0].id));
+    }
+  }, [templates, templateId]);
 
-  function setFieldValue(key: string, v: unknown) {
-    setValues((prev) => ({ ...prev, [key]: v }));
+  const loadTemplate = useCallback(async () => {
+    if (!templateId) {
+      setTemplate(null);
+      return;
+    }
+    setTplFetching(true);
+    try {
+      const res = await TemplatesApi.get(Number(templateId));
+      setTemplate(res);
+      setValues({});
+      setErrors({});
+    } catch (e) {
+      toast.error(
+        "Could not load template",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    } finally {
+      setTplFetching(false);
+    }
+  }, [templateId, toast]);
+
+  useEffect(() => {
+    loadTemplate();
+  }, [loadTemplate]);
+
+  const fields = useMemo(() => template?.fields ?? [], [template]);
+
+  const selectedTarget = useMemo(
+    () => targets.find((t) => t.id === Number(targetId)),
+    [targets, targetId],
+  );
+
+  useEffect(() => {
+    if (selectedTarget) {
+      /* eslint-disable react-hooks/set-state-in-effect */
+      setReportingPeriodId(String(selectedTarget.reportingPeriodId));
+      setLgaId(String(selectedTarget.lgaId));
+      /* eslint-enable react-hooks/set-state-in-effect */
+    }
+  }, [selectedTarget]);
+
+  function setFieldValue(fieldId: number, v: string) {
+    setValues((prev) => ({ ...prev, [fieldId]: v }));
   }
 
-  function validate(requireAll: boolean): Record<string, string> {
+  function validate(): Record<string, string> {
     const errs: Record<string, string> = {};
-    if (!title.trim()) errs._title = "Title is required";
-    if (!mdaId) errs._mda = "MDA is required";
-    if (!typeId) errs._type = "Report type is required";
-    if (!periodId) errs._period = "Period is required";
-    if (template && requireAll) {
-      for (const f of template.fields) {
-        if (!f.required) continue;
-        const v = values[f.key];
-        const empty =
-          v === undefined ||
-          v === null ||
-          v === "" ||
-          (Array.isArray(v) && v.length === 0);
-        if (empty) errs[f.key] = `${f.label} is required`;
+    if (!session?.userId) errs._user = "Not signed in";
+    if (!reportingPeriodId) errs._period = "Reporting period ID required";
+    if (!lgaId) errs._lga = "LGA ID required";
+    if (fields.length === 0) errs._template = "This template has no fields";
+    for (const f of fields) {
+      if (f.required && !values[f.id]?.toString().trim()) {
+        errs[String(f.id)] = `${f.fieldName} is required`;
       }
     }
     return errs;
   }
 
-  function save(submit: boolean) {
-    const errs = validate(submit);
+  async function submit() {
+    const errs = validate();
     setErrors(errs);
     if (Object.keys(errs).length) {
       toast.warn("Missing information", "Please complete the highlighted fields.");
       return;
     }
-    const created = add("reports", {
-      title: title.trim(),
-      mdaId,
-      typeId,
-      periodId,
-      status: submit ? "submitted" : "draft",
-      templateId: template?.id,
-      submittedBy: state.activeUserId ?? undefined,
-      submittedAt: submit ? nowISO() : undefined,
-      values,
-      notes,
-    } as never);
-    toast.success(
-      submit ? "Report submitted" : "Draft saved",
-      submit
-        ? "The report is now in the submitted queue."
-        : "You can find it in Reports and continue later.",
-    );
-    router.push("/reports");
-    return created;
+    if (!session) return;
+    setSubmitting(true);
+    try {
+      const writeOne = async (f: TemplateFieldDto) => {
+        const raw = values[f.id];
+        if (raw === undefined || raw === "") return null;
+        return TemplateDataApi.upsert({
+          templateFieldId: f.id,
+          targetId: targetId ? Number(targetId) : null,
+          userId: session.userId,
+          lgaId: Number(lgaId),
+          reportingPeriodId: Number(reportingPeriodId),
+          value: String(raw),
+        });
+      };
+      const results = await Promise.all(fields.map(writeOne));
+      const ok = results.filter(Boolean).length;
+      toast.success(
+        "Data saved",
+        `${ok} field value${ok === 1 ? "" : "s"} stored.`,
+      );
+      router.push("/progress");
+    } catch (e) {
+      toast.error(
+        "Submit failed",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    } finally {
+      setSubmitting(false);
+    }
   }
 
-  if (state.templates.length === 0) {
+  if (!tplLoading && templates.length === 0) {
     return (
       <div>
         <PageHeader
@@ -154,113 +180,134 @@ function CaptureInner() {
         title="Fill Dynamic Form"
         subtitle="Capture data using a saved template."
         actions={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={() => save(false)} leftIcon={<Save className="h-4 w-4" />}>
-              Save draft
-            </Button>
-            <Button onClick={() => save(true)} leftIcon={<Send className="h-4 w-4" />}>
-              Submit report
-            </Button>
-          </div>
+          <Button
+            onClick={submit}
+            loading={submitting}
+            leftIcon={<Save className="h-4 w-4" />}
+          >
+            Submit data
+          </Button>
         }
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[380px,1fr]">
         <Card className="lg:sticky lg:top-[140px] lg:h-fit">
-          <CardHeader title="Report context" subtitle="Details attached to the report." />
+          <CardHeader
+            title="Context"
+            subtitle="Required backend identifiers for the upsert."
+          />
           <CardBody className="space-y-4">
             <Field label="Template">
-              <Select value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-                {state.templates.map((t) => (
+              <Select
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+              >
+                <option value="">— Select —</option>
+                {templates.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name}
+                    {t.name} (#{t.id})
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Title" required error={errors._title}>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-            </Field>
-            <Field label="MDA" required error={errors._mda}>
-              <Select value={mdaId} onChange={(e) => setMdaId(e.target.value)}>
-                <option value="">— Select —</option>
-                {state.mdas.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Report type" required error={errors._type}>
-              <Select value={typeId} onChange={(e) => setTypeId(e.target.value)}>
-                <option value="">— Select —</option>
-                {state.reportTypes.map((t) => (
+            <Field label="Linked target (optional)">
+              <Select
+                value={targetId}
+                onChange={(e) => setTargetId(e.target.value)}
+              >
+                <option value="">— None —</option>
+                {targets.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name}
+                    {t.targetName} (#{t.id})
                   </option>
                 ))}
               </Select>
             </Field>
-            <Field label="Period" required error={errors._period}>
-              <Select value={periodId} onChange={(e) => setPeriodId(e.target.value)}>
-                <option value="">— Select —</option>
-                {state.reportingPeriods.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </Select>
+            <Field
+              label="Reporting period ID"
+              required
+              error={errors._period}
+              hint="Numeric ID"
+            >
+              <Input
+                type="number"
+                min={1}
+                value={reportingPeriodId}
+                onChange={(e) => setReportingPeriodId(e.target.value)}
+                invalid={!!errors._period}
+              />
             </Field>
-            <Field label="Notes">
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
+            <Field label="LGA ID" required error={errors._lga}>
+              <Input
+                type="number"
+                min={1}
+                value={lgaId}
+                onChange={(e) => setLgaId(e.target.value)}
+                invalid={!!errors._lga}
+              />
             </Field>
+            <div className="rounded-lg border bg-[var(--surface-2)] p-3 text-[11px] muted">
+              Signed in as{" "}
+              <b>
+                user #{session?.userId} · {session?.email}
+              </b>
+              . Submitted values are stored through the{" "}
+              <code>/TemplateData</code> upsert endpoint.
+            </div>
           </CardBody>
         </Card>
 
         <Card>
           <CardHeader
             title={template?.name ?? "Template"}
-            subtitle={
-              template?.description ?? "Fill in the fields defined by this template."
-            }
+            subtitle={template?.type ? `Type: ${template.type}` : undefined}
             actions={
               template ? (
-                <Badge tone="neutral">{template.fields.length} fields</Badge>
+                <Badge tone="neutral">{fields.length} fields</Badge>
               ) : null
             }
           />
           <CardBody>
-            {!template ? (
+            {tplFetching ? (
+              <div className="p-6 text-center text-sm muted">
+                Loading template…
+              </div>
+            ) : !template ? (
               <EmptyState title="Pick a template" />
-            ) : template.fields.length === 0 ? (
+            ) : fields.length === 0 ? (
               <EmptyState
                 title="This template has no fields"
                 message="Edit the template to add fields, then come back to capture data."
                 action={
-                  <Button onClick={() => router.push(`/templates`)}>
+                  <Button onClick={() => router.push("/templates")}>
                     Edit template
                   </Button>
                 }
               />
             ) : (
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {template.fields.map((f) => (
+                {fields.map((f) => (
                   <div
                     key={f.id}
                     className={
-                      f.type === "textarea" || f.type === "multiselect"
+                      f.fieldType === "textarea" || f.fieldType === "multiselect"
                         ? "sm:col-span-2"
                         : undefined
                     }
                   >
                     <DynamicField
                       field={f}
-                      value={values[f.key]}
-                      error={errors[f.key]}
-                      onChange={(v) => setFieldValue(f.key, v)}
+                      value={values[f.id] ?? ""}
+                      error={errors[String(f.id)]}
+                      onChange={(v) => setFieldValue(f.id, v)}
                     />
                   </div>
                 ))}
+                <div className="sm:col-span-2 flex items-center gap-2 rounded-lg border bg-[var(--surface-2)] p-3 text-xs muted">
+                  <CheckCircle2 className="h-4 w-4 text-[var(--color-brand-600)]" />
+                  Each field writes one <code>TemplateData</code> upsert on
+                  submit.
+                </div>
               </div>
             )}
           </CardBody>
@@ -276,72 +323,53 @@ function DynamicField({
   onChange,
   error,
 }: {
-  field: TemplateField;
-  value: unknown;
-  onChange: (v: unknown) => void;
+  field: TemplateFieldDto;
+  value: string;
+  onChange: (v: string) => void;
   error?: string;
 }) {
-  const common = { required: field.required };
-  const label = field.label;
-  switch (field.type) {
+  const label = (
+    <span className="flex items-center gap-1.5">
+      {field.fieldName}
+      {field.unitId ? (
+        <span className="text-[10px] muted">(unit #{field.unitId})</span>
+      ) : null}
+    </span>
+  );
+  const options = (field.options ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  switch (field.fieldType) {
     case "textarea":
       return (
-        <Field label={label} {...common} error={error} hint={field.help}>
+        <Field label={label} required={field.required} error={error}>
           <Textarea
-            value={(value as string) ?? ""}
+            value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={field.placeholder}
             invalid={!!error}
           />
         </Field>
       );
     case "number":
-      return (
-        <Field label={label} {...common} error={error} hint={field.help}>
-          <Input
-            type="number"
-            min={field.min}
-            max={field.max}
-            value={(value as number | string) ?? ""}
-            onChange={(e) =>
-              onChange(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            placeholder={field.placeholder}
-            invalid={!!error}
-          />
-        </Field>
-      );
     case "currency":
       return (
-        <Field
-          label={label}
-          {...common}
-          error={error}
-          hint={
-            field.help ??
-            (typeof value === "number" && !isNaN(value)
-              ? formatCurrency(value)
-              : undefined)
-          }
-        >
+        <Field label={label} required={field.required} error={error}>
           <Input
             type="number"
-            min={field.min}
-            value={(value as number | string) ?? ""}
-            onChange={(e) =>
-              onChange(e.target.value === "" ? "" : Number(e.target.value))
-            }
-            placeholder={field.placeholder ?? "0"}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
             invalid={!!error}
           />
         </Field>
       );
     case "date":
       return (
-        <Field label={label} {...common} error={error} hint={field.help}>
+        <Field label={label} required={field.required} error={error}>
           <Input
             type="date"
-            value={(value as string) ?? ""}
+            value={value}
             onChange={(e) => onChange(e.target.value)}
             invalid={!!error}
           />
@@ -349,75 +377,41 @@ function DynamicField({
       );
     case "select":
       return (
-        <Field label={label} {...common} error={error} hint={field.help}>
+        <Field label={label} required={field.required} error={error}>
           <Select
-            value={(value as string) ?? ""}
+            value={value}
             onChange={(e) => onChange(e.target.value)}
             invalid={!!error}
           >
             <option value="">— Select —</option>
-            {(field.options ?? []).map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
+            {options.map((o) => (
+              <option key={o} value={o}>
+                {o}
               </option>
             ))}
           </Select>
         </Field>
       );
-    case "multiselect":
-      return (
-        <Field label={label} {...common} error={error} hint={field.help ?? "Cmd/Ctrl-click for multiple"}>
-          <select
-            multiple
-            value={(value as string[]) ?? []}
-            onChange={(e) =>
-              onChange(
-                Array.from(e.target.selectedOptions).map((o) => o.value),
-              )
-            }
-            className="block w-full rounded-lg border bg-[var(--surface)] p-2 text-sm min-h-[120px]"
-          >
-            {(field.options ?? []).map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        </Field>
-      );
     case "checkbox":
       return (
-        <Field label={label} error={error} hint={field.help}>
+        <Field label={label} error={error}>
           <label className="inline-flex h-10 items-center gap-2">
             <input
               type="checkbox"
+              checked={value === "true"}
+              onChange={(e) => onChange(e.target.checked ? "true" : "false")}
               className="h-4 w-4"
-              checked={!!value}
-              onChange={(e) => onChange(e.target.checked)}
             />
-            <span className="text-sm">{field.placeholder ?? "Yes"}</span>
+            <span className="text-sm">Yes</span>
           </label>
         </Field>
       );
-    case "file":
-      return (
-        <Field label={label} {...common} error={error} hint="File name or reference">
-          <Input
-            value={(value as string) ?? ""}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={field.placeholder ?? "e.g. quarterly_report.pdf"}
-            invalid={!!error}
-          />
-        </Field>
-      );
-    case "text":
     default:
       return (
-        <Field label={label} {...common} error={error} hint={field.help}>
+        <Field label={label} required={field.required} error={error}>
           <Input
-            value={(value as string) ?? ""}
+            value={value}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={field.placeholder}
             invalid={!!error}
           />
         </Field>

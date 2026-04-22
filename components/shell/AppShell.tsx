@@ -5,15 +5,36 @@ import { Sidebar } from "./Sidebar";
 import { Topbar } from "./Topbar";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
+import { PUBLIC_ROUTES, useAuth } from "@/lib/auth";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pathname = usePathname();
+  const { session, initializing } = useAuth();
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setMobileNavOpen(false);
   }, [pathname]);
+
+  const isPublic = PUBLIC_ROUTES.has(pathname ?? "");
+
+  if (isPublic) {
+    return <>{children}</>;
+  }
+
+  if (initializing || !session) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background)]">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-9 w-9 animate-spin rounded-full border-2 border-[var(--color-brand-500)] border-t-transparent" />
+          <div className="text-xs muted">
+            {initializing ? "Loading session…" : "Redirecting…"}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-[var(--background)]">

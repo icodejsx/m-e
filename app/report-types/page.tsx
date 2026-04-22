@@ -1,118 +1,101 @@
 "use client";
 
 import { FileType2 } from "lucide-react";
-import { ResourcePage } from "@/components/resource/ResourcePage";
-import { Field, Input, Select, Textarea } from "@/components/ui/Input";
-import { Badge } from "@/components/ui/Badge";
-import { useStore } from "@/lib/store";
-import type { ReportType } from "@/lib/types";
+import { RemoteResourcePage } from "@/components/resource/RemoteResourcePage";
+import { Field, Input, Select } from "@/components/ui/Input";
+import { ReportTypesApi } from "@/lib/api/endpoints";
+import { useReportCategories } from "@/lib/api/hooks";
+import type {
+  CreateReportTypeDto,
+  ReportTypeDto,
+} from "@/lib/api/types";
 
 export default function ReportTypesPage() {
-  const { state } = useStore();
+  const { data: categories } = useReportCategories();
+
   return (
-    <ResourcePage<ReportType>
-      collection="reportTypes"
+    <RemoteResourcePage<ReportTypeDto, CreateReportTypeDto>
       icon={<FileType2 className="h-5 w-5" />}
       title="Report Types"
-      subtitle="Specific report templates assigned to reporting officers."
+      subtitle="Each type belongs to a category and is used to create reports."
       singular="Report type"
-      plural="Report types"
-      searchKeys={["name", "description"]}
-      columns={[
-        {
-          key: "name",
-          header: "Name",
-          sortBy: (r) => r.name,
-          render: (r) => <span className="font-medium">{r.name}</span>,
-        },
-        {
-          key: "category",
-          header: "Category",
-          sortBy: (r) => state.reportCategories.find((c) => c.id === r.categoryId)?.name,
-          render: (r) => {
-            const c = state.reportCategories.find((c) => c.id === r.categoryId);
-            const cls = c ? state.reportClasses.find((x) => x.id === c.classId) : null;
-            return c ? (
-              <div className="flex flex-col">
-                <span>{c.name}</span>
-                {cls ? <span className="text-xs muted">{cls.name}</span> : null}
-              </div>
-            ) : (
-              "—"
-            );
-          },
-        },
-        {
-          key: "template",
-          header: "Template",
-          hidden: "md",
-          render: (r) => {
-            const t = state.templates.find((tmp) => tmp.id === r.templateId);
-            return t ? <Badge tone="violet">{t.name}</Badge> : <span className="muted">—</span>;
-          },
-        },
-      ]}
+      fetchPage={({ page, pageSize }) =>
+        ReportTypesApi.list({ page, pageSize })
+      }
+      create={(v) => ReportTypesApi.create(v)}
+      update={(id, v) => ReportTypesApi.update(id, v)}
+      remove={(id) => ReportTypesApi.remove(id)}
+      toFormValue={(r) => ({
+        name: r.name ?? "",
+        reportCategoryId: r.reportCategoryId,
+      })}
       defaultValue={() => ({
         name: "",
-        categoryId: state.reportCategories[0]?.id,
-        templateId: undefined,
-        description: "",
+        reportCategoryId: categories[0]?.id,
       })}
       validate={(v) => {
         const e: Record<string, string> = {};
         if (!v.name?.trim()) e.name = "Name is required";
-        if (!v.categoryId) e.categoryId = "Category is required";
+        if (!v.reportCategoryId)
+          e.reportCategoryId = "Report category is required";
         return e;
       }}
-      canDelete={(r) =>
-        state.reports.some((rep) => rep.typeId === r.id)
-          ? "Remove related reports first."
-          : null
-      }
+      columns={[
+        {
+          key: "id",
+          header: "ID",
+          width: "80px",
+          render: (r) => <span className="muted tabular-nums">#{r.id}</span>,
+          sortBy: (r) => Number(r.id),
+        },
+        {
+          key: "name",
+          header: "Name",
+          render: (r) => <span className="font-medium">{r.name}</span>,
+          sortBy: (r) => r.name ?? "",
+        },
+        {
+          key: "category",
+          header: "Category",
+          render: (r) =>
+            categories.find((c) => c.id === r.reportCategoryId)?.name ??
+            `#${r.reportCategoryId}`,
+          sortBy: (r) => r.reportCategoryId,
+        },
+      ]}
       renderForm={({ value, setField, errors }) => (
         <>
-          <Field label="Category" required error={errors.categoryId}>
-            <Select
-              value={value.categoryId ?? ""}
-              onChange={(e) => setField("categoryId", e.target.value)}
-              invalid={!!errors.categoryId}
-            >
-              <option value="">— Select category —</option>
-              {state.reportCategories.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
           <Field label="Name" required error={errors.name}>
             <Input
               value={value.name ?? ""}
               onChange={(e) => setField("name", e.target.value)}
               invalid={!!errors.name}
+              maxLength={256}
+              placeholder="e.g. PHC Monthly Service"
             />
           </Field>
           <Field
-            label="Default template"
-            hint="Optional template applied when capturing this report type."
+            label="Report category"
+            required
+            error={errors.reportCategoryId}
           >
             <Select
-              value={value.templateId ?? ""}
-              onChange={(e) => setField("templateId", e.target.value || undefined)}
+              value={value.reportCategoryId ?? ""}
+              onChange={(e) =>
+                setField(
+                  "reportCategoryId",
+                  Number(e.target.value) || undefined,
+                )
+              }
+              invalid={!!errors.reportCategoryId}
             >
-              <option value="">— None —</option>
-              {state.templates.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              <option value="">— Select —</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name} (#{c.id})
                 </option>
               ))}
             </Select>
-          </Field>
-          <Field label="Description">
-            <Textarea
-              value={value.description ?? ""}
-              onChange={(e) => setField("description", e.target.value)}
-            />
           </Field>
         </>
       )}

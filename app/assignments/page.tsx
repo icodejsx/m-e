@@ -1,176 +1,432 @@
 "use client";
 
-import { UserCog } from "lucide-react";
-import { ResourcePage } from "@/components/resource/ResourcePage";
+import { UserCog, RefreshCcw, Trash2, Plus } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { Card, CardBody, CardHeader } from "@/components/ui/Card";
+import { EmptyState } from "@/components/ui/EmptyState";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
-import { useStore } from "@/lib/store";
-import type { Assignment } from "@/lib/types";
+import { IconButton } from "@/components/ui/RowActions";
+import { AssignmentsApi } from "@/lib/api/endpoints";
+import { useReports, useUsers } from "@/lib/api/hooks";
+import { useModal } from "@/lib/modal";
+import { useToast } from "@/lib/toast";
+import type {
+  CreateUserLgaDto,
+  CreateUserReportDto,
+  UserLgaDto,
+  UserReportDto,
+} from "@/lib/api/types";
 
 export default function AssignmentsPage() {
-  const { state } = useStore();
+  const modal = useModal();
+  const toast = useToast();
+  const { data: users } = useUsers();
+  const { data: reports } = useReports();
+
+  const [reportAssignments, setReportAssignments] = useState<UserReportDto[]>(
+    [],
+  );
+  const [lgaAssignments, setLgaAssignments] = useState<UserLgaDto[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [r, l] = await Promise.all([
+        AssignmentsApi.listUserReports({ page: 1, pageSize: 100 }),
+        AssignmentsApi.listUserLgas({ page: 1, pageSize: 100 }),
+      ]);
+      setReportAssignments(r.items ?? []);
+      setLgaAssignments(l.items ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load assignments");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    reload();
+  }, [reload]);
+
+  function userLabel(id: number) {
+    const u = users.find((x) => x.id === id);
+    return u ? `${u.name} (${u.email})` : `User #${id}`;
+  }
+
+  function reportLabel(id: number) {
+    const r = reports.find((x) => x.id === id);
+    return r ? `${r.reportName} (#${r.id})` : `Report #${id}`;
+  }
+
+  function openNewReportAssignment() {
+    modal.open({
+      title: "Assign user to report",
+      size: "md",
+      body: (
+        <AssignmentForm<CreateUserReportDto>
+          initial={{ userId: users[0]?.id ?? 0, reportId: reports[0]?.id ?? 0 }}
+          onCancel={() => modal.close()}
+          onSave={async (v) => {
+            try {
+              await AssignmentsApi.createUserReport(v);
+              toast.success("Assignment added");
+              modal.close();
+              await reload();
+            } catch (e) {
+              toast.error(
+                "Save failed",
+                e instanceof Error ? e.message : "Unexpected error",
+              );
+            }
+          }}
+          fields={[
+            {
+              key: "userId",
+              label: "User",
+              options: users.map((u) => ({
+                value: u.id,
+                label: userLabel(u.id),
+              })),
+            },
+            {
+              key: "reportId",
+              label: "Report",
+              options: reports.map((r) => ({
+                value: r.id,
+                label: reportLabel(r.id),
+              })),
+            },
+          ]}
+        />
+      ),
+    });
+  }
+
+  function openNewLgaAssignment() {
+    modal.open({
+      title: "Assign user to LGA",
+      size: "md",
+      body: (
+        <LgaAssignmentForm
+          users={users}
+          onCancel={() => modal.close()}
+          onSave={async (v) => {
+            try {
+              await AssignmentsApi.createUserLga(v);
+              toast.success("LGA assignment added");
+              modal.close();
+              await reload();
+            } catch (e) {
+              toast.error(
+                "Save failed",
+                e instanceof Error ? e.message : "Unexpected error",
+              );
+            }
+          }}
+        />
+      ),
+    });
+  }
+
+  async function removeReport(id: number) {
+    const ok = await modal.confirm({
+      title: "Remove report assignment?",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await AssignmentsApi.removeUserReport(id);
+      toast.success("Removed");
+      await reload();
+    } catch (e) {
+      toast.error(
+        "Delete failed",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    }
+  }
+
+  async function removeLga(id: number) {
+    const ok = await modal.confirm({
+      title: "Remove LGA assignment?",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await AssignmentsApi.removeUserLga(id);
+      toast.success("Removed");
+      await reload();
+    } catch (e) {
+      toast.error(
+        "Delete failed",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    }
+  }
 
   return (
-    <ResourcePage<Assignment>
-      collection="assignments"
-      icon={<UserCog className="h-5 w-5" />}
-      title="User Assignments"
-      subtitle="Scope users to MDAs/Departments and the report types they're allowed to submit."
-      singular="Assignment"
-      plural="Assignments"
-      columns={[
-        {
-          key: "user",
-          header: "User",
-          sortBy: (r) => state.users.find((u) => u.id === r.userId)?.name,
-          render: (r) => {
-            const u = state.users.find((x) => x.id === r.userId);
-            return u ? (
-              <div>
-                <div className="font-medium">{u.name}</div>
-                <div className="text-xs muted">{u.email}</div>
-              </div>
-            ) : (
-              "—"
-            );
-          },
-        },
-        {
-          key: "scope",
-          header: "Scope",
-          render: (r) => {
-            const mda = state.mdas.find((m) => m.id === r.mdaId);
-            const dept = state.departments.find((d) => d.id === r.departmentId);
-            return (
-              <div className="flex flex-wrap gap-1">
-                {mda ? <Badge tone="brand">{mda.code}</Badge> : null}
-                {dept ? <Badge tone="info">{dept.name}</Badge> : null}
-                {!mda && !dept ? <span className="muted">—</span> : null}
-              </div>
-            );
-          },
-        },
-        {
-          key: "reportTypes",
-          header: "Report types",
-          render: (r) => (
-            <div className="flex flex-wrap gap-1">
-              {r.reportTypeIds.length === 0 ? (
-                <span className="muted text-xs">—</span>
-              ) : (
-                r.reportTypeIds.slice(0, 3).map((id) => {
-                  const t = state.reportTypes.find((x) => x.id === id);
-                  return t ? (
-                    <Badge key={id} tone="violet">
-                      {t.name}
-                    </Badge>
-                  ) : null;
-                })
-              )}
-              {r.reportTypeIds.length > 3 ? (
-                <Badge tone="neutral">+{r.reportTypeIds.length - 3}</Badge>
-              ) : null}
-            </div>
-          ),
-        },
-      ]}
-      defaultValue={() => ({
-        userId: state.users.find((u) => u.role === "reporting_officer")?.id,
-        mdaId: undefined,
-        departmentId: undefined,
-        reportTypeIds: [],
-        note: "",
-      })}
-      validate={(v) => {
-        const e: Record<string, string> = {};
-        if (!v.userId) e.userId = "Pick a user";
-        if (!v.mdaId && !v.departmentId)
-          e.mdaId = "Assign an MDA or department";
-        return e;
-      }}
-      renderForm={({ value, setField, errors }) => {
-        const deptsForMda = value.mdaId
-          ? state.departments.filter((d) => d.mdaId === value.mdaId)
-          : state.departments;
-        return (
-          <>
-            <Field label="User" required error={errors.userId}>
-              <Select
-                value={value.userId ?? ""}
-                onChange={(e) => setField("userId", e.target.value)}
-                invalid={!!errors.userId}
+    <div>
+      <PageHeader
+        icon={<UserCog className="h-5 w-5" />}
+        title="User Assignments"
+        subtitle="Scope users to reports and LGAs they are allowed to operate on."
+        actions={
+          <Button
+            variant="outline"
+            leftIcon={<RefreshCcw className="h-4 w-4" />}
+            onClick={reload}
+            loading={loading}
+          >
+            Refresh
+          </Button>
+        }
+      />
+
+      {error ? (
+        <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300">
+          {error}
+        </div>
+      ) : null}
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader
+            title="User ↔ Report"
+            subtitle="Reports each user is allowed to submit."
+            actions={
+              <Button
+                size="sm"
+                leftIcon={<Plus className="h-3.5 w-3.5" />}
+                onClick={openNewReportAssignment}
               >
-                <option value="">— Select user —</option>
-                {state.users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} · {u.email}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="MDA" required error={errors.mdaId}>
-                <Select
-                  value={value.mdaId ?? ""}
-                  onChange={(e) => setField("mdaId", e.target.value || undefined)}
-                  invalid={!!errors.mdaId}
-                >
-                  <option value="">— Any —</option>
-                  {state.mdas.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-              <Field label="Department">
-                <Select
-                  value={value.departmentId ?? ""}
-                  onChange={(e) =>
-                    setField("departmentId", e.target.value || undefined)
-                  }
-                >
-                  <option value="">— Any —</option>
-                  {deptsForMda.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.name}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            </div>
-            <Field
-              label="Report types"
-              hint="Hold Cmd/Ctrl to select multiple. Leave empty to allow all types."
-            >
-              <select
-                multiple
-                value={value.reportTypeIds ?? []}
-                onChange={(e) =>
-                  setField(
-                    "reportTypeIds",
-                    Array.from(e.target.selectedOptions).map((o) => o.value),
-                  )
-                }
-                className="block w-full rounded-lg border bg-[var(--surface)] p-2 text-sm min-h-[120px]"
-              >
-                {state.reportTypes.map((rt) => (
-                  <option key={rt.id} value={rt.id}>
-                    {rt.name}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field label="Note">
-              <Input
-                value={value.note ?? ""}
-                onChange={(e) => setField("note", e.target.value)}
-                placeholder="Optional note about this assignment"
+                Add
+              </Button>
+            }
+          />
+          <CardBody className="p-0">
+            {reportAssignments.length === 0 ? (
+              <EmptyState
+                className="m-4"
+                title={loading ? "Loading…" : "No assignments"}
               />
-            </Field>
-          </>
-        );
-      }}
-    />
+            ) : (
+              <ul className="divide-y">
+                {reportAssignments.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">
+                        {userLabel(a.userId)}
+                      </div>
+                      <div className="mt-0.5 text-xs muted">
+                        <Badge tone="brand">{reportLabel(a.reportId)}</Badge>
+                      </div>
+                    </div>
+                    <IconButton
+                      tone="danger"
+                      title="Remove"
+                      onClick={() => removeReport(a.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="User ↔ LGA"
+            subtitle="LGAs each user is authorised to report on."
+            actions={
+              <Button
+                size="sm"
+                leftIcon={<Plus className="h-3.5 w-3.5" />}
+                onClick={openNewLgaAssignment}
+              >
+                Add
+              </Button>
+            }
+          />
+          <CardBody className="p-0">
+            {lgaAssignments.length === 0 ? (
+              <EmptyState
+                className="m-4"
+                title={loading ? "Loading…" : "No assignments"}
+              />
+            ) : (
+              <ul className="divide-y">
+                {lgaAssignments.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">
+                        {userLabel(a.userId)}
+                      </div>
+                      <div className="mt-0.5 text-xs muted">
+                        <Badge tone="info">LGA #{a.lgaId}</Badge>
+                      </div>
+                    </div>
+                    <IconButton
+                      tone="danger"
+                      title="Remove"
+                      onClick={() => removeLga(a.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardBody>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+interface FieldSpec<V> {
+  key: keyof V;
+  label: string;
+  options: { value: number; label: string }[];
+}
+
+function AssignmentForm<V extends object>({
+  initial,
+  fields,
+  onCancel,
+  onSave,
+}: {
+  initial: V;
+  fields: FieldSpec<V>[];
+  onCancel: () => void;
+  onSave: (v: V) => Promise<void>;
+}) {
+  const [value, setValue] = useState<V>(initial);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    try {
+      await onSave(value);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      {fields.map((f) => (
+        <Field key={String(f.key)} label={f.label} required>
+          <Select
+            value={String(value[f.key] ?? "")}
+            onChange={(e) =>
+              setValue((prev) => ({
+                ...prev,
+                [f.key]: Number(e.target.value) || 0,
+              }) as V)
+            }
+          >
+            <option value="">— Select —</option>
+            {f.options.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </Select>
+        </Field>
+      ))}
+      <div className="flex justify-end gap-2 border-t pt-4">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={submitting}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" loading={submitting}>
+          Save
+        </Button>
+      </div>
+    </form>
+  );
+}
+
+function LgaAssignmentForm({
+  users,
+  onCancel,
+  onSave,
+}: {
+  users: { id: number; name: string | null; email: string | null }[];
+  onCancel: () => void;
+  onSave: (v: CreateUserLgaDto) => Promise<void>;
+}) {
+  const [userId, setUserId] = useState<number>(users[0]?.id ?? 0);
+  const [lgaId, setLgaId] = useState<string>("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!userId || !lgaId) return;
+    setSubmitting(true);
+    try {
+      await onSave({ userId, lgaId: Number(lgaId) });
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-4">
+      <Field label="User" required>
+        <Select
+          value={String(userId)}
+          onChange={(e) => setUserId(Number(e.target.value) || 0)}
+        >
+          <option value="">— Select —</option>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.name} ({u.email})
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="LGA ID" required hint="Numeric LGA identifier">
+        <Input
+          type="number"
+          min={1}
+          value={lgaId}
+          onChange={(e) => setLgaId(e.target.value)}
+          placeholder="1"
+        />
+      </Field>
+      <div className="flex justify-end gap-2 border-t pt-4">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={submitting}
+        >
+          Cancel
+        </Button>
+        <Button type="submit" loading={submitting}>
+          Save
+        </Button>
+      </div>
+    </form>
   );
 }
