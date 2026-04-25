@@ -21,7 +21,7 @@ interface ModalDescriptor {
   body: React.ReactNode;
   onClose?: () => void;
 }
-
+// ss
 interface ModalContextValue {
   open: (m: Omit<ModalDescriptor, "id">) => string;
   close: (id?: string) => void;
