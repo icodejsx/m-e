@@ -49,7 +49,7 @@ export default function ProjectsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await DepartmentsApi.list({ page: 1, pageSize: 500 });
+        const res = await DepartmentsApi.list({ page: 1, pageSize: 1000 });
         const items = [...(res.items ?? [])].sort((a, b) =>
           departmentDisplayName(a).localeCompare(
             departmentDisplayName(b),

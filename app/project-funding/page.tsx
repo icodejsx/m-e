@@ -1,92 +1,145 @@
 "use client";
 
 import { Banknote } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { ResourcePage } from "@/components/resource/ResourcePage";
 import { Field, Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
+import { ProjectsApi } from "@/lib/api/endpoints";
+import type { ProjectDto } from "@/lib/api/types";
 import { useStore } from "@/lib/store";
-import type { ProjectFunding } from "@/lib/types";
+import type { ID, ProjectFunding } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
+
+function resolveProject(
+  apiProjects: ProjectDto[],
+  projectId: ID,
+): ProjectDto | undefined {
+  return apiProjects.find((p) => String(p.id) === String(projectId));
+}
 
 export default function ProjectFundingPage() {
   const { state } = useStore();
+  const [apiProjects, setApiProjects] = useState<ProjectDto[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await ProjectsApi.list({ page: 1, pageSize: 1000 });
+        const items = [...(res.items ?? [])].sort((a, b) =>
+          String(a.projectName ?? "").localeCompare(
+            String(b.projectName ?? ""),
+            undefined,
+            { sensitivity: "base" },
+          ),
+        );
+        if (!cancelled) setApiProjects(items);
+      } catch {
+        if (!cancelled) setApiProjects([]);
+      } finally {
+        if (!cancelled) setProjectsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const columns = useMemo(
+    () => [
+      {
+        key: "project",
+        header: "Project",
+        sortBy: (r: ProjectFunding) =>
+          resolveProject(apiProjects, r.projectId)?.projectName ?? "",
+        render: (r: ProjectFunding) => {
+          const p = resolveProject(apiProjects, r.projectId);
+          return p ? (
+            <div>
+              <div className="font-medium">{p.projectName ?? "—"}</div>
+              {p.description ? (
+                <div className="mt-0.5 line-clamp-1 text-xs muted">
+                  {p.description}
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <span className="muted">Unknown project (ID {r.projectId})</span>
+          );
+        },
+      },
+      {
+        key: "source",
+        header: "Source",
+        sortBy: (r: ProjectFunding) =>
+          state.fundingSources.find((s) => s.id === r.sourceId)?.name,
+        render: (r: ProjectFunding) => {
+          const s = state.fundingSources.find((x) => x.id === r.sourceId);
+          return s ? (
+            <Badge
+              tone={
+                s.kind === "donor"
+                  ? "violet"
+                  : s.kind === "government"
+                    ? "brand"
+                    : s.kind === "internal"
+                      ? "info"
+                      : "neutral"
+              }
+            >
+              {s.name}
+            </Badge>
+          ) : (
+            "—"
+          );
+        },
+      },
+      {
+        key: "amount",
+        header: "Amount",
+        align: "right" as const,
+        sortBy: (r: ProjectFunding) => r.amount,
+        render: (r: ProjectFunding) => (
+          <span className="tabular-nums font-medium">
+            {formatCurrency(r.amount, r.currency)}
+          </span>
+        ),
+      },
+      {
+        key: "currency",
+        header: "Currency",
+        hidden: "md" as const,
+        sortBy: (r: ProjectFunding) => r.currency,
+        render: (r: ProjectFunding) => r.currency,
+      },
+      {
+        key: "note",
+        header: "Note",
+        hidden: "lg" as const,
+        render: (r: ProjectFunding) => (
+          <span className="muted">{r.note ?? "—"}</span>
+        ),
+      },
+    ],
+    [apiProjects, state.fundingSources],
+  );
+
   return (
     <ResourcePage<ProjectFunding>
       collection="projectFundings"
       icon={<Banknote className="h-5 w-5" />}
       title="Project Funding"
-      subtitle="Allocations from funding sources to projects."
+      subtitle="Allocations from funding sources to projects (projects loaded from the API)."
       singular="Funding entry"
       plural="Funding entries"
-      columns={[
-        {
-          key: "project",
-          header: "Project",
-          sortBy: (r) => state.projects.find((p) => p.id === r.projectId)?.name,
-          render: (r) => {
-            const p = state.projects.find((x) => x.id === r.projectId);
-            return p ? (
-              <div>
-                <div className="font-medium">{p.name}</div>
-                {p.code ? <div className="text-xs muted">{p.code}</div> : null}
-              </div>
-            ) : (
-              "—"
-            );
-          },
-        },
-        {
-          key: "source",
-          header: "Source",
-          sortBy: (r) => state.fundingSources.find((s) => s.id === r.sourceId)?.name,
-          render: (r) => {
-            const s = state.fundingSources.find((x) => x.id === r.sourceId);
-            return s ? (
-              <Badge
-                tone={
-                  s.kind === "donor"
-                    ? "violet"
-                    : s.kind === "government"
-                      ? "brand"
-                      : s.kind === "internal"
-                        ? "info"
-                        : "neutral"
-                }
-              >
-                {s.name}
-              </Badge>
-            ) : (
-              "—"
-            );
-          },
-        },
-        {
-          key: "amount",
-          header: "Amount",
-          align: "right",
-          sortBy: (r) => r.amount,
-          render: (r) => (
-            <span className="tabular-nums font-medium">
-              {formatCurrency(r.amount, r.currency)}
-            </span>
-          ),
-        },
-        {
-          key: "currency",
-          header: "Currency",
-          hidden: "md",
-          sortBy: (r) => r.currency,
-          render: (r) => r.currency,
-        },
-        {
-          key: "note",
-          header: "Note",
-          hidden: "lg",
-          render: (r) => <span className="muted">{r.note ?? "—"}</span>,
-        },
-      ]}
+      columns={columns}
       defaultValue={() => ({
-        projectId: state.projects[0]?.id,
+        projectId:
+          apiProjects[0]?.id !== undefined
+            ? String(apiProjects[0].id)
+            : undefined,
         sourceId: state.fundingSources[0]?.id,
         amount: 0,
         currency: "NGN",
@@ -96,7 +149,8 @@ export default function ProjectFundingPage() {
         const e: Record<string, string> = {};
         if (!v.projectId) e.projectId = "Project is required";
         if (!v.sourceId) e.sourceId = "Source is required";
-        if (!v.amount || v.amount <= 0) e.amount = "Amount must be greater than 0";
+        if (!v.amount || v.amount <= 0)
+          e.amount = "Amount must be greater than 0";
         return e;
       }}
       renderForm={({ value, setField, errors }) => (
@@ -105,12 +159,19 @@ export default function ProjectFundingPage() {
             <Select
               value={value.projectId ?? ""}
               onChange={(e) => setField("projectId", e.target.value)}
+              disabled={projectsLoading}
               invalid={!!errors.projectId}
             >
-              <option value="">— Select project —</option>
-              {state.projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
+              <option value="">
+                {projectsLoading
+                  ? "Loading projects…"
+                  : apiProjects.length === 0
+                    ? "No projects returned from API"
+                    : "— Select project —"}
+              </option>
+              {apiProjects.map((p) => (
+                <option key={p.id} value={String(p.id)}>
+                  {p.projectName ?? `Project #${p.id}`}
                 </option>
               ))}
             </Select>
