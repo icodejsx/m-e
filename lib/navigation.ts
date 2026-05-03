@@ -1,5 +1,6 @@
 import {
   LayoutDashboard,
+  Sparkles,
   Building2,
   Network,
   FolderTree,
@@ -44,6 +45,12 @@ export const NAV: NavSection[] = [
         label: "Dashboard",
         icon: LayoutDashboard,
         description: "Programme KPIs, submissions and target progress.",
+      },
+      {
+        href: "/ai-analytics",
+        label: "AI analytics",
+        icon: Sparkles,
+        description: "Visual aggregates plus an AI session over your workspace data.",
       },
     ],
   },
