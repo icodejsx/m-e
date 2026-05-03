@@ -6,15 +6,9 @@ import { usePathname } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ChevronDown, Sparkles } from "lucide-react";
 import { NAV } from "@/lib/navigation";
-import { useStore } from "@/lib/store";
-import { useToast } from "@/lib/toast";
-import { useModal } from "@/lib/modal";
 
 export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const { resetDemoData, state } = useStore();
-  const toast = useToast();
-  const modal = useModal();
 
   const initialOpen = useMemo(() => {
     const out: Record<string, boolean> = {};
@@ -24,25 +18,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const [open, setOpen] = useState<Record<string, boolean>>(initialOpen);
 
   const activePath = pathname || "/";
-
-  async function handleReset() {
-    const ok = await modal.confirm({
-      title: "Reset demo data?",
-      message:
-        "This will replace all current data with the fresh seed dataset. Your changes will be lost.",
-      confirmLabel: "Reset data",
-      tone: "danger",
-    });
-    if (!ok) return;
-    resetDemoData();
-    toast.success("Demo data reset", "Fresh seed dataset loaded.");
-  }
-
-  const totalRecords =
-    state.mdas.length +
-    state.projects.length +
-    state.reports.length +
-    state.targets.length;
 
   return (
     <aside className="flex h-full w-[280px] shrink-0 flex-col border-r bg-[var(--surface)]">
@@ -121,26 +96,6 @@ export function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           );
         })}
       </nav>
-
-      <div className="mt-auto border-t p-3 space-y-2">
-        <div className="rounded-xl bg-[var(--surface-2)] px-3 py-2.5 text-[11px]">
-          <div className="flex items-center justify-between">
-            <span className="muted">Storage</span>
-            <span className="font-medium">Local browser</span>
-          </div>
-          <div className="mt-1 flex items-center justify-between">
-            <span className="muted">Records</span>
-            <span className="font-medium tabular-nums">{totalRecords}</span>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleReset}
-          className="w-full rounded-lg border px-3 py-2 text-xs font-medium text-[var(--foreground)]/80 transition-colors hover:bg-[var(--surface-2)]"
-        >
-          Reset demo data
-        </button>
-      </div>
     </aside>
   );
 }
