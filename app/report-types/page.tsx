@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import { FileType2 } from "lucide-react";
 import { RemoteResourcePage } from "@/components/resource/RemoteResourcePage";
 import { Field, Input, Select } from "@/components/ui/Input";
@@ -12,6 +13,24 @@ import type {
 
 export default function ReportTypesPage() {
   const { data: categories } = useReportCategories();
+  const [categoryFilter, setCategoryFilter] = useState<number | "">("");
+
+  const fetchPage = useCallback(
+    ({
+      page,
+      pageSize,
+    }: {
+      page: number;
+      pageSize: number;
+      search: string;
+    }) =>
+      ReportTypesApi.list({
+        page,
+        pageSize,
+        ...(categoryFilter !== "" ? { reportCategoryId: categoryFilter } : {}),
+      }),
+    [categoryFilter],
+  );
 
   return (
     <RemoteResourcePage<ReportTypeDto, CreateReportTypeDto>
@@ -19,8 +38,27 @@ export default function ReportTypesPage() {
       title="Report Types"
       subtitle="Each type belongs to a category and is used to create reports."
       singular="Report type"
-      fetchPage={({ page, pageSize }) =>
-        ReportTypesApi.list({ page, pageSize })
+      fetchPage={fetchPage}
+      resetPageWhen={categoryFilter}
+      hasActiveFilters={categoryFilter !== ""}
+      filters={
+        <Select
+          inputSize="sm"
+          className="min-w-[240px]"
+          aria-label="Filter by report category"
+          value={categoryFilter === "" ? "" : String(categoryFilter)}
+          onChange={(e) => {
+            const v = e.target.value;
+            setCategoryFilter(v === "" ? "" : Number(v));
+          }}
+        >
+          <option value="">All report categories</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name ?? `Category #${c.id}`}
+            </option>
+          ))}
+        </Select>
       }
       create={(v) => ReportTypesApi.create(v)}
       update={(id, v) => ReportTypesApi.update(id, v)}

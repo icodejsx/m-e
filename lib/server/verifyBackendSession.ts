@@ -18,7 +18,7 @@ export async function verifyBackendSession(
     process.env.BACKEND_ORIGIN?.replace(/\/+$/, "") ??
     "https://app-service.icadpays.com";
 
-  const url = `${backend}/api/Users/${userId}`;
+  const url = `${backend}/api/users/${userId}`;
   const res = await fetch(url, {
     method: "GET",
     headers: {

@@ -32,7 +32,7 @@ export default function TargetsPage() {
         reportId: r.reportId ?? null,
         projectId: r.projectId ?? null,
         reportingPeriodId: r.reportingPeriodId,
-        lgaId: r.lgaId,
+        locationId: r.locationId,
         value: r.value,
         unitId: r.unitId,
         frequency: r.frequency ?? "Monthly",
@@ -95,10 +95,14 @@ export default function TargetsPage() {
           render: (r) => <Badge tone="neutral">Period #{r.reportingPeriodId}</Badge>,
         },
         {
-          key: "lga",
-          header: "LGA",
+          key: "location",
+          header: "Location",
           hidden: "lg",
-          render: (r) => <Badge tone="neutral">LGA #{r.lgaId}</Badge>,
+          render: (r) => (
+            <Badge tone="neutral">
+              {r.locationName ?? `Location #${r.locationId}`}
+            </Badge>
+          ),
         },
         {
           key: "unit",
@@ -215,13 +219,13 @@ export default function TargetsPage() {
                 placeholder="1"
               />
             </Field>
-            <Field label="LGA ID">
+            <Field label="Location ID">
               <Input
                 type="number"
                 min={1}
-                value={value.lgaId ?? ""}
+                value={value.locationId ?? ""}
                 onChange={(e) =>
-                  setField("lgaId", Number(e.target.value) || undefined)
+                  setField("locationId", Number(e.target.value) || undefined)
                 }
                 placeholder="1"
               />

@@ -4,11 +4,11 @@ import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Sparkles,
-  SendHorizontal,
   Loader2,
   Landmark,
   Briefcase,
   ArrowRight,
+  Download,
 } from "lucide-react";
 import { useStore, useActiveContext } from "@/lib/store";
 import { useAuth } from "@/lib/auth";
@@ -16,9 +16,12 @@ import { PageHeader } from "@/components/ui/PageHeader";
 import { Stat } from "@/components/ui/Stat";
 import { Card, CardBody, CardHeader } from "@/components/ui/Card";
 import { buildAnalyticsSnapshot } from "@/lib/analyticsSnapshot";
+import { downloadProfessionalAiTranscript } from "@/lib/pdf/aiTranscriptPdf";
 import { formatCurrency, formatNumber } from "@/lib/utils";
 
 type ChatTurn = { role: "user" | "assistant"; content: string };
+
+const MODEL_LABEL = "GPT-4o-mini";
 
 function MiniBars({
   rows,
@@ -129,6 +132,11 @@ export default function AiAnalyticsPage() {
     }
   }
 
+  function clearAnalysis() {
+    setMessages([]);
+    setError(null);
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -137,15 +145,20 @@ export default function AiAnalyticsPage() {
         subtitle={
           activePeriod ? (
             <>
-              Insights use your live workspace data. Reporting period filter matches the
-              dashboard:{" "}
+              The assistant blends your{" "}
+              <strong className="font-medium text-[var(--foreground)]">workspace snapshot</strong>{" "}
+              with{" "}
+              <strong className="font-medium text-[var(--foreground)]">
+                live API data
+              </strong>{" "}
+              (same routes as the backend Swagger docs). Reporting period for charts:{" "}
               <span className="font-medium text-[var(--foreground)]">
                 {activePeriod.name}
               </span>
-              . Change it from the shell context picker if needed.
+              .
             </>
           ) : (
-            "No active reporting period selected — numbers include all periods."
+            "Workspace charts include all periods. Signed-in sessions can query the live API via the assistant."
           )
         }
         actions={
@@ -261,7 +274,7 @@ export default function AiAnalyticsPage() {
         <Card className="flex min-h-[480px] flex-col xl:min-h-[640px]">
           <CardHeader
             title="AI session"
-            subtitle="Ask questions about this snapshot. The model only sees the aggregated JSON sent from this page—not other tabs."
+            subtitle="Ask about programmes, LGAs, funding, reports, and targets. Answers may combine your workspace snapshot with authenticated GET calls to the M&E API."
           />
           <CardBody className="flex flex-1 flex-col gap-3">
             <div className="flex flex-1 flex-col gap-3 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3 text-sm">
@@ -304,16 +317,14 @@ export default function AiAnalyticsPage() {
               </p>
             ) : null}
 
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+            <div className="flex flex-col gap-3">
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
-                rows={3}
+                rows={4}
                 placeholder="Ask about funding, projects, reports, targets…"
-                className="min-h-[88px] w-full flex-1 resize-y rounded-xl border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm outline-none ring-[var(--color-brand-500)] focus-visible:ring-2"
-                disabled={
-                  pending || authInitializing || !session
-                }
+                className="min-h-[100px] w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2.5 text-sm outline-none ring-[var(--color-brand-500)] focus-visible:ring-2"
+                disabled={pending || authInitializing || !session}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -321,24 +332,76 @@ export default function AiAnalyticsPage() {
                   }
                 }}
               />
-              <button
-                type="button"
-                onClick={() => void send()}
-                disabled={
-                  pending ||
-                  !input.trim() ||
-                  authInitializing ||
-                  !session
-                }
-                className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-[var(--color-brand-600)] px-4 text-sm font-medium text-white hover:bg-[var(--color-brand-700)] disabled:pointer-events-none disabled:opacity-40"
-              >
-                {pending ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <SendHorizontal className="h-4 w-4" />
-                )}
-                Send
-              </button>
+
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void send()}
+                    disabled={
+                      pending ||
+                      !input.trim() ||
+                      authInitializing ||
+                      !session
+                    }
+                    className="inline-flex items-center gap-2 rounded-md bg-[#2CB5BE] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#259aa3] disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    {pending ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-4 w-4 shrink-0" />
+                    )}
+                    Run AI analysis
+                  </button>
+
+                  <button
+                    type="button"
+                    title="Download chat transcript as a .pdf file"
+                    disabled={
+                      messages.length === 0 ||
+                      pending ||
+                      authInitializing ||
+                      !session
+                    }
+                    onClick={() =>
+                      void downloadProfessionalAiTranscript(messages).catch(() =>
+                        window.alert(
+                          "Could not create the PDF. Check disk permissions or try again.",
+                        ),
+                      )
+                    }
+                    className="inline-flex items-center gap-2 rounded-md border border-[var(--foreground)]/20 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--foreground)] shadow-sm transition-colors hover:bg-[var(--surface-2)] disabled:pointer-events-none disabled:opacity-40 dark:border-[var(--foreground)]/25"
+                  >
+                    <Download className="h-4 w-4 shrink-0" />
+                    Download PDF
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={pending || authInitializing || !session}
+                    onClick={clearAnalysis}
+                    className="inline-flex items-center gap-2 rounded-md border border-[var(--foreground)]/20 bg-[var(--surface)] px-4 py-2 text-sm font-medium text-[var(--foreground)] shadow-sm transition-colors hover:bg-[var(--surface-2)] disabled:pointer-events-none disabled:opacity-40 dark:border-[var(--foreground)]/25"
+                  >
+                    Clear
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 text-xs text-[var(--muted)]">
+                  <Sparkles className="h-3.5 w-3.5 opacity-70" aria-hidden />
+                  <span className="font-medium tracking-tight text-[var(--foreground)]/70">
+                    {MODEL_LABEL}
+                  </span>
+                </div>
+              </div>
+
+              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                <strong className="font-medium text-[var(--foreground)]/80">
+                  PDF:
+                </strong>{" "}
+                A4 report layout with clear headings, lists, and page numbers.
+                Markdown is cleaned automatically so the file reads like a formal
+                document.
+              </p>
             </div>
           </CardBody>
         </Card>

@@ -136,7 +136,7 @@ export default function ProgressPage() {
         targetId: t.id,
         userId: session.userId,
         reportingPeriodId: t.reportingPeriodId,
-        lgaId: t.lgaId,
+        locationId: t.locationId,
       });
       toast.success("Recalculated", "Progress aggregated from template data.");
       await reload();
@@ -214,7 +214,7 @@ export default function ProgressPage() {
                       ) : null}
                     </div>
                   }
-                  subtitle={`Target value ${t.value.toLocaleString()} · Period #${t.reportingPeriodId} · LGA #${t.lgaId}`}
+                  subtitle={`Target value ${t.value.toLocaleString()} · Period #${t.reportingPeriodId} · ${t.locationName ?? `Location #${t.locationId}`}`}
                   actions={
                     <div className="flex items-center gap-2">
                       <Button
@@ -262,7 +262,10 @@ export default function ProgressPage() {
                               <Badge tone="neutral">
                                 Period #{e.reportingPeriodId}
                               </Badge>
-                              <Badge tone="neutral">LGA #{e.lgaId}</Badge>
+                              <Badge tone="neutral">
+                                {e.locationName ??
+                                  `Location #${e.locationId}`}
+                              </Badge>
                               <Badge tone="info">{e.status ?? "—"}</Badge>
                               <span className="text-[11px] muted">
                                 User #{e.userId}
@@ -319,8 +322,8 @@ function ProgressForm({
   const [reportingPeriodId, setReportingPeriodId] = useState(
     String(initial?.reportingPeriodId ?? target.reportingPeriodId ?? ""),
   );
-  const [lgaId, setLgaId] = useState(
-    String(initial?.lgaId ?? target.lgaId ?? ""),
+  const [locationId, setLocationId] = useState(
+    String(initial?.locationId ?? target.locationId ?? ""),
   );
   const [userId, setUserId] = useState(
     String(initial?.userId ?? currentUserId ?? ""),
@@ -333,7 +336,7 @@ function ProgressForm({
     const errs: Record<string, string> = {};
     if (!status) errs.status = "Status is required";
     if (!reportingPeriodId) errs.periodId = "Period is required";
-    if (!lgaId) errs.lgaId = "LGA is required";
+    if (!locationId) errs.locationId = "Location is required";
     if (!userId) errs.userId = "User is required";
     if (Object.keys(errs).length) {
       setErrors(errs);
@@ -346,7 +349,7 @@ function ProgressForm({
         targetId: target.id,
         userId: Number(userId),
         reportingPeriodId: Number(reportingPeriodId),
-        lgaId: Number(lgaId),
+        locationId: Number(locationId),
         actualValue: Number(actualValue) || 0,
         status,
       });
@@ -397,13 +400,13 @@ function ProgressForm({
             invalid={!!errors.periodId}
           />
         </Field>
-        <Field label="LGA ID" required error={errors.lgaId}>
+        <Field label="Location ID" required error={errors.locationId}>
           <Input
             type="number"
             min={1}
-            value={lgaId}
-            onChange={(e) => setLgaId(e.target.value)}
-            invalid={!!errors.lgaId}
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            invalid={!!errors.locationId}
           />
         </Field>
       </div>

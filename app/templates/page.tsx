@@ -33,8 +33,6 @@ const FIELD_TYPES = [
   "file",
 ];
 
-const FREQUENCIES = ["Daily", "Weekly", "Monthly", "Quarterly", "Annually"];
-
 const TEMPLATE_TYPES = ["Report", "Project", "Generic"];
 
 export default function TemplatesPage() {
@@ -348,9 +346,6 @@ export default function TemplatesPage() {
                               <Badge tone="danger">required</Badge>
                             ) : null}
                             <Badge tone="neutral">{f.fieldType ?? "—"}</Badge>
-                            {f.frequency ? (
-                              <Badge tone="info">{f.frequency}</Badge>
-                            ) : null}
                           </div>
                           <div className="mt-0.5 text-xs muted">
                             #{f.id}
@@ -518,7 +513,6 @@ function FieldForm({
   const [required, setRequired] = useState(false);
   const [unitId, setUnitId] = useState<string>("");
   const [options, setOptions] = useState("");
-  const [frequency, setFrequency] = useState("Monthly");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
@@ -527,7 +521,6 @@ function FieldForm({
     const errs: Record<string, string> = {};
     if (!fieldName.trim()) errs.fieldName = "Name is required";
     if (!fieldType) errs.fieldType = "Type is required";
-    if (!frequency) errs.frequency = "Frequency is required";
     if (Object.keys(errs).length) {
       setErrors(errs);
       return;
@@ -538,7 +531,6 @@ function FieldForm({
         fieldName: fieldName.trim(),
         fieldType,
         required,
-        frequency,
         unitId: unitId ? Number(unitId) : null,
         options: options.trim() || null,
       });
@@ -576,30 +568,15 @@ function FieldForm({
           </Select>
         </Field>
       </div>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Unit ID">
-          <Input
-            type="number"
-            min={1}
-            value={unitId}
-            onChange={(e) => setUnitId(e.target.value)}
-            placeholder="Optional"
-          />
-        </Field>
-        <Field label="Frequency" required error={errors.frequency}>
-          <Select
-            value={frequency}
-            onChange={(e) => setFrequency(e.target.value)}
-            invalid={!!errors.frequency}
-          >
-            {FREQUENCIES.map((f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
+      <Field label="Unit ID">
+        <Input
+          type="number"
+          min={1}
+          value={unitId}
+          onChange={(e) => setUnitId(e.target.value)}
+          placeholder="Optional"
+        />
+      </Field>
       <Field label="Required?">
         <label className="inline-flex h-10 items-center gap-2">
           <input

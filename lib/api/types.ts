@@ -85,6 +85,16 @@ export interface UpdateReportTypeDto {
   reportCategoryId?: number;
 }
 
+/** Departments / agencies (backend `/departments`). */
+export interface DepartmentDto {
+  id: number;
+  name?: string | null;
+  /** Some APIs use this instead of `name`. */
+  departmentName?: string | null;
+  code?: string | null;
+  mdaId?: number;
+}
+
 export interface ReportDto {
   id: number;
   reportName: string | null;
@@ -92,6 +102,13 @@ export interface ReportDto {
   reportCategoryId: number;
   reportTypeId: number;
   frequency: string | null;
+  /** Present on enriched list/detail responses when returned by the API. */
+  reportKind?: string | null;
+  departmentName?: string | null;
+  mdaId?: number;
+  mdaName?: string | null;
+  categoryName?: string | null;
+  typeName?: string | null;
 }
 export interface CreateReportDto {
   reportName: string;
@@ -99,6 +116,7 @@ export interface CreateReportDto {
   reportCategoryId?: number;
   reportTypeId?: number;
   frequency: string;
+  reportKind?: string | null;
 }
 export type UpdateReportDto = CreateReportDto;
 
@@ -110,6 +128,10 @@ export interface ProjectDto {
   startDate: string;
   endDate: string;
   status: string | null;
+  mdaId?: number;
+  departmentName?: string | null;
+  /** Funding links when the API returns an enriched project. */
+  fundings?: unknown;
 }
 export interface CreateProjectDto {
   projectName: string;
@@ -127,17 +149,20 @@ export interface TargetDto {
   reportId: number | null;
   projectId: number | null;
   reportingPeriodId: number;
-  lgaId: number;
+  locationId: number;
   value: number;
   unitId: number;
   frequency: string | null;
+  locationName?: string | null;
+  reportName?: string | null;
+  projectName?: string | null;
 }
 export interface CreateTargetDto {
   targetName: string;
   reportId?: number | null;
   projectId?: number | null;
   reportingPeriodId?: number;
-  lgaId?: number;
+  locationId?: number;
   value?: number;
   unitId?: number;
   frequency: string;
@@ -152,7 +177,6 @@ export interface TemplateFieldDto {
   unitId: number | null;
   required: boolean;
   options: string | null;
-  frequency: string | null;
 }
 export interface CreateTemplateFieldDto {
   fieldName: string;
@@ -160,7 +184,6 @@ export interface CreateTemplateFieldDto {
   unitId?: number | null;
   required?: boolean;
   options?: string | null;
-  frequency: string;
 }
 
 export interface TemplateDto {
@@ -184,16 +207,17 @@ export interface TemplateDataDto {
   templateFieldId: number;
   targetId: number | null;
   userId: number;
-  lgaId: number;
+  locationId: number;
   reportingPeriodId: number;
   value: string | null;
+  locationName?: string | null;
 }
 export interface UpsertTemplateDataDto {
   id?: number | null;
   templateFieldId: number;
   targetId?: number | null;
   userId: number;
-  lgaId: number;
+  locationId: number;
   reportingPeriodId: number;
   value: string;
 }
@@ -203,16 +227,17 @@ export interface TargetProgressDto {
   targetId: number;
   userId: number;
   reportingPeriodId: number;
-  lgaId: number;
+  locationId: number;
   actualValue: number;
   status: string | null;
+  locationName?: string | null;
 }
 export interface UpsertTargetProgressDto {
   id?: number | null;
   targetId: number;
   userId: number;
   reportingPeriodId: number;
-  lgaId: number;
+  locationId: number;
   actualValue?: number;
   status: string;
 }
@@ -221,6 +246,7 @@ export interface UserReportDto {
   id: number;
   userId: number;
   reportId: number;
+  reportName?: string | null;
 }
 export interface CreateUserReportDto {
   userId: number;
@@ -230,11 +256,41 @@ export interface CreateUserReportDto {
 export interface UserLgaDto {
   id: number;
   userId: number;
-  lgaId: number;
+  locationId: number;
+  locationName?: string | null;
 }
 export interface CreateUserLgaDto {
   userId: number;
-  lgaId: number;
+  locationId: number;
+}
+
+export interface FundingSourceDto {
+  id: number;
+  name: string | null;
+  year?: number;
+}
+export interface CreateFundingSourceDto {
+  name: string;
+  year?: number;
+}
+export type UpdateFundingSourceDto = Partial<CreateFundingSourceDto>;
+
+/** Lightweight project row from `GET /projects/list`. */
+export interface ProjectListItemDto {
+  id: number;
+  projectName: string | null;
+  departmentId?: number;
+}
+
+export interface UserDepartmentDto {
+  id: number;
+  userId: number;
+  departmentId: number;
+  departmentName?: string | null;
+}
+export interface CreateUserDepartmentDto {
+  userId: number;
+  departmentId: number;
 }
 
 export interface ApiError extends Error {

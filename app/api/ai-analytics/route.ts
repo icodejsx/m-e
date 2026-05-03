@@ -3,13 +3,16 @@ import {
   aiAnalyticsAuthRequired,
   verifyBackendSession,
 } from "@/lib/server/verifyBackendSession";
+import {
+  AI_ANALYTICS_MODEL,
+  runAiAnalyticsAgent,
+} from "@/lib/server/aiAnalyticsAgent";
 
 export const runtime = "nodejs";
 
 const USER_ID_HEADER = "x-me-user-id";
 
 const MAX_BODY_CHARS = 180_000;
-const MODEL = "gpt-4o-mini";
 
 type ChatRole = "user" | "assistant";
 
@@ -87,57 +90,25 @@ export async function POST(req: Request) {
   }
   const trimmedHistory = msgs.slice(-24);
 
-  const snapshotJson = JSON.stringify(body.snapshot);
+  const backendOrigin =
+    process.env.BACKEND_ORIGIN?.replace(/\/+$/, "") ??
+    "https://app-service.icadpays.com";
 
-  const system = `You are an analytics copilot for a Monitoring & Evaluation (M&E) web application.
+  try {
+    const { reply } = await runAiAnalyticsAgent({
+      apiKey,
+      backendOrigin,
+      authorizationHeader: req.headers.get("authorization"),
+      snapshot: body.snapshot,
+      messages: trimmedHistory,
+    });
 
-You will receive a JSON snapshot called programme_snapshot. It aggregates MDAs (organizations), projects, budgets, funding allocations, reports in the active reporting period, targets, and progress.
-
-Rules:
-- Ground every quantitative claim in programme_snapshot. If something is not in the snapshot, say you do not have that data.
-- Prefer short sections with markdown headings (##) and bullet lists.
-- Call out risks: reporting backlog, under-funded projects vs budget, uneven submissions across MDAs, targets lagging.
-- Use plain language suitable for programme managers.
-
-programme_snapshot JSON:
-${snapshotJson}`;
-
-  const openaiMessages: { role: "system" | ChatRole; content: string }[] = [
-    { role: "system", content: system },
-    ...trimmedHistory.map((m) => ({ role: m.role, content: m.content })),
-  ];
-
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.4,
-      messages: openaiMessages,
-    }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
+    return NextResponse.json({ reply, model: AI_ANALYTICS_MODEL });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Agent failed";
     return NextResponse.json(
-      {
-        error: "OpenAI request failed",
-        detail: errText.slice(0, 500),
-      },
+      { error: msg.slice(0, 800) },
       { status: 502 },
     );
   }
-
-  const data = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const content = data.choices?.[0]?.message?.content?.trim();
-  if (!content) {
-    return NextResponse.json({ error: "Empty model response" }, { status: 502 });
-  }
-
-  return NextResponse.json({ reply: content, model: MODEL });
 }

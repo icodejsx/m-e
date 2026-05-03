@@ -9,13 +9,16 @@ import { Button } from "@/components/ui/Button";
 import { Field, Input, Select } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { IconButton } from "@/components/ui/RowActions";
-import { AssignmentsApi } from "@/lib/api/endpoints";
+import { AssignmentsApi, DepartmentsApi } from "@/lib/api/endpoints";
 import { useReports, useUsers } from "@/lib/api/hooks";
 import { useModal } from "@/lib/modal";
 import { useToast } from "@/lib/toast";
 import type {
+  CreateUserDepartmentDto,
   CreateUserLgaDto,
   CreateUserReportDto,
+  DepartmentDto,
+  UserDepartmentDto,
   UserLgaDto,
   UserReportDto,
 } from "@/lib/api/types";
@@ -30,6 +33,10 @@ export default function AssignmentsPage() {
     [],
   );
   const [lgaAssignments, setLgaAssignments] = useState<UserLgaDto[]>([]);
+  const [departmentAssignments, setDepartmentAssignments] = useState<
+    UserDepartmentDto[]
+  >([]);
+  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -37,12 +44,16 @@ export default function AssignmentsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [r, l] = await Promise.all([
+      const [r, l, d, deptPage] = await Promise.all([
         AssignmentsApi.listUserReports({ page: 1, pageSize: 100 }),
         AssignmentsApi.listUserLgas({ page: 1, pageSize: 100 }),
+        AssignmentsApi.listUserDepartments({ page: 1, pageSize: 100 }),
+        DepartmentsApi.list({ page: 1, pageSize: 200 }),
       ]);
       setReportAssignments(r.items ?? []);
       setLgaAssignments(l.items ?? []);
+      setDepartmentAssignments(d.items ?? []);
+      setDepartments(deptPage.items ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load assignments");
     } finally {
@@ -62,6 +73,12 @@ export default function AssignmentsPage() {
   function reportLabel(id: number) {
     const r = reports.find((x) => x.id === id);
     return r ? `${r.reportName} (#${r.id})` : `Report #${id}`;
+  }
+
+  function departmentLabel(id: number) {
+    const x = departments.find((d) => d.id === id);
+    const n = x?.name ?? x?.departmentName;
+    return n ? `${n} (#${id})` : `Department #${id}`;
   }
 
   function openNewReportAssignment() {
@@ -108,9 +125,56 @@ export default function AssignmentsPage() {
     });
   }
 
+  function openNewDepartmentAssignment() {
+    modal.open({
+      title: "Assign user to department",
+      size: "md",
+      body: (
+        <AssignmentForm<CreateUserDepartmentDto>
+          initial={{
+            userId: users[0]?.id ?? 0,
+            departmentId: departments[0]?.id ?? 0,
+          }}
+          onCancel={() => modal.close()}
+          onSave={async (v) => {
+            try {
+              await AssignmentsApi.createUserDepartment(v);
+              toast.success("Department assignment added");
+              modal.close();
+              await reload();
+            } catch (e) {
+              toast.error(
+                "Save failed",
+                e instanceof Error ? e.message : "Unexpected error",
+              );
+            }
+          }}
+          fields={[
+            {
+              key: "userId",
+              label: "User",
+              options: users.map((u) => ({
+                value: u.id,
+                label: userLabel(u.id),
+              })),
+            },
+            {
+              key: "departmentId",
+              label: "Department",
+              options: departments.map((d) => ({
+                value: d.id,
+                label: departmentLabel(d.id),
+              })),
+            },
+          ]}
+        />
+      ),
+    });
+  }
+
   function openNewLgaAssignment() {
     modal.open({
-      title: "Assign user to LGA",
+      title: "Assign user to location",
       size: "md",
       body: (
         <LgaAssignmentForm
@@ -119,7 +183,7 @@ export default function AssignmentsPage() {
           onSave={async (v) => {
             try {
               await AssignmentsApi.createUserLga(v);
-              toast.success("LGA assignment added");
+              toast.success("Location assignment added");
               modal.close();
               await reload();
             } catch (e) {
@@ -152,9 +216,27 @@ export default function AssignmentsPage() {
     }
   }
 
+  async function removeDepartment(id: number) {
+    const ok = await modal.confirm({
+      title: "Remove department assignment?",
+      tone: "danger",
+    });
+    if (!ok) return;
+    try {
+      await AssignmentsApi.removeUserDepartment(id);
+      toast.success("Removed");
+      await reload();
+    } catch (e) {
+      toast.error(
+        "Delete failed",
+        e instanceof Error ? e.message : "Unexpected error",
+      );
+    }
+  }
+
   async function removeLga(id: number) {
     const ok = await modal.confirm({
-      title: "Remove LGA assignment?",
+      title: "Remove location assignment?",
       tone: "danger",
     });
     if (!ok) return;
@@ -175,7 +257,7 @@ export default function AssignmentsPage() {
       <PageHeader
         icon={<UserCog className="h-5 w-5" />}
         title="User Assignments"
-        subtitle="Scope users to reports and LGAs they are allowed to operate on."
+        subtitle="Scope users to reports, locations (LGAs), and departments they are allowed to operate on."
         actions={
           <Button
             variant="outline"
@@ -194,7 +276,7 @@ export default function AssignmentsPage() {
         </div>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card>
           <CardHeader
             title="User ↔ Report"
@@ -227,7 +309,11 @@ export default function AssignmentsPage() {
                         {userLabel(a.userId)}
                       </div>
                       <div className="mt-0.5 text-xs muted">
-                        <Badge tone="brand">{reportLabel(a.reportId)}</Badge>
+                        <Badge tone="brand">
+                          {a.reportName?.trim()
+                            ? `${a.reportName} (#${a.reportId})`
+                            : reportLabel(a.reportId)}
+                        </Badge>
                       </div>
                     </div>
                     <IconButton
@@ -246,8 +332,8 @@ export default function AssignmentsPage() {
 
         <Card>
           <CardHeader
-            title="User ↔ LGA"
-            subtitle="LGAs each user is authorised to report on."
+            title="User ↔ Location"
+            subtitle="Locations (LGAs) each user is authorised to report on."
             actions={
               <Button
                 size="sm"
@@ -276,13 +362,70 @@ export default function AssignmentsPage() {
                         {userLabel(a.userId)}
                       </div>
                       <div className="mt-0.5 text-xs muted">
-                        <Badge tone="info">LGA #{a.lgaId}</Badge>
+                        <Badge tone="info">
+                          {a.locationName ??
+                            `Location #${a.locationId}`}
+                        </Badge>
                       </div>
                     </div>
                     <IconButton
                       tone="danger"
                       title="Remove"
                       onClick={() => removeLga(a.id)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </IconButton>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardBody>
+        </Card>
+
+        <Card>
+          <CardHeader
+            title="User ↔ Department"
+            subtitle="Departments each user is associated with."
+            actions={
+              <Button
+                size="sm"
+                leftIcon={<Plus className="h-3.5 w-3.5" />}
+                onClick={openNewDepartmentAssignment}
+                disabled={departments.length === 0}
+              >
+                Add
+              </Button>
+            }
+          />
+          <CardBody className="p-0">
+            {departmentAssignments.length === 0 ? (
+              <EmptyState
+                className="m-4"
+                title={loading ? "Loading…" : "No assignments"}
+              />
+            ) : (
+              <ul className="divide-y">
+                {departmentAssignments.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">
+                        {userLabel(a.userId)}
+                      </div>
+                      <div className="mt-0.5 text-xs muted">
+                        <Badge tone="neutral">
+                          {a.departmentName?.trim()
+                            ? `${a.departmentName} (#${a.departmentId})`
+                            : departmentLabel(a.departmentId)}
+                        </Badge>
+                      </div>
+                    </div>
+                    <IconButton
+                      tone="danger"
+                      title="Remove"
+                      onClick={() => removeDepartment(a.id)}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </IconButton>
@@ -376,15 +519,15 @@ function LgaAssignmentForm({
   onSave: (v: CreateUserLgaDto) => Promise<void>;
 }) {
   const [userId, setUserId] = useState<number>(users[0]?.id ?? 0);
-  const [lgaId, setLgaId] = useState<string>("");
+  const [locationId, setLocationId] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!userId || !lgaId) return;
+    if (!userId || !locationId) return;
     setSubmitting(true);
     try {
-      await onSave({ userId, lgaId: Number(lgaId) });
+      await onSave({ userId, locationId: Number(locationId) });
     } finally {
       setSubmitting(false);
     }
@@ -405,12 +548,12 @@ function LgaAssignmentForm({
           ))}
         </Select>
       </Field>
-      <Field label="LGA ID" required hint="Numeric LGA identifier">
+      <Field label="Location ID" required hint="Numeric location / LGA identifier">
         <Input
           type="number"
           min={1}
-          value={lgaId}
-          onChange={(e) => setLgaId(e.target.value)}
+          value={locationId}
+          onChange={(e) => setLocationId(e.target.value)}
           placeholder="1"
         />
       </Field>

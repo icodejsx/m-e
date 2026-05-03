@@ -1,6 +1,7 @@
 import { apiRequest, paged } from "./client";
 import type {
   AuthResponseDto,
+  CreateFundingSourceDto,
   CreateProjectDto,
   CreateReportCategoryDto,
   CreateReportClassDto,
@@ -9,12 +10,16 @@ import type {
   CreateTargetDto,
   CreateTemplateDto,
   CreateTemplateFieldDto,
+  CreateUserDepartmentDto,
   CreateUserDto,
   CreateUserLgaDto,
   CreateUserReportDto,
+  DepartmentDto,
+  FundingSourceDto,
   LoginRequestDto,
   PagedResult,
   ProjectDto,
+  ProjectListItemDto,
   RegisterRequestDto,
   ReportCategoryDto,
   ReportClassDto,
@@ -25,6 +30,7 @@ import type {
   TemplateDataDto,
   TemplateDto,
   TemplateFieldDto,
+  UpdateFundingSourceDto,
   UpdateProjectDto,
   UpdateReportCategoryDto,
   UpdateReportClassDto,
@@ -35,6 +41,7 @@ import type {
   UpdateUserDto,
   UpsertTargetProgressDto,
   UpsertTemplateDataDto,
+  UserDepartmentDto,
   UserDto,
   UserLgaDto,
   UserReportDto,
@@ -44,77 +51,121 @@ export type PageParams = { page?: number; pageSize?: number };
 
 export const AuthApi = {
   login: (body: LoginRequestDto) =>
-    apiRequest<AuthResponseDto>("/Auth/login", { method: "POST", body, auth: false }),
+    apiRequest<AuthResponseDto>("/auth/login", { method: "POST", body, auth: false }),
   register: (body: RegisterRequestDto) =>
-    apiRequest<AuthResponseDto>("/Auth/register", { method: "POST", body, auth: false }),
+    apiRequest<AuthResponseDto>("/auth/register", { method: "POST", body, auth: false }),
+};
+
+export const DepartmentsApi = {
+  list: (q: PageParams = {}) => paged<DepartmentDto>("/departments", q),
 };
 
 export const UsersApi = {
   list: (q: PageParams & { departmentId?: number } = {}) =>
-    paged<UserDto>("/Users", q),
-  get: (id: number) => apiRequest<UserDto>(`/Users/${id}`),
+    paged<UserDto>("/users", q),
+  get: (id: number) => apiRequest<UserDto>(`/users/${id}`),
   create: (body: CreateUserDto) =>
-    apiRequest<UserDto>("/Users", { method: "POST", body }),
+    apiRequest<UserDto>("/users", { method: "POST", body }),
   update: (id: number, body: UpdateUserDto) =>
-    apiRequest<UserDto>(`/Users/${id}`, { method: "PUT", body }),
-  remove: (id: number) => apiRequest<void>(`/Users/${id}`, { method: "DELETE" }),
+    apiRequest<UserDto>(`/users/${id}`, { method: "PUT", body }),
+  remove: (id: number) =>
+    apiRequest<void>(`/users/${id}`, { method: "DELETE" }),
 };
 
 export const ReportClassesApi = {
-  list: () => apiRequest<ReportClassDto[]>("/ReportClasses"),
+  list: () => apiRequest<ReportClassDto[]>("/report-classes"),
   create: (body: CreateReportClassDto) =>
-    apiRequest<ReportClassDto>("/ReportClasses", { method: "POST", body }),
+    apiRequest<ReportClassDto>("/report-classes", { method: "POST", body }),
   update: (id: number, body: UpdateReportClassDto) =>
-    apiRequest<ReportClassDto>(`/ReportClasses/${id}`, { method: "PUT", body }),
+    apiRequest<ReportClassDto>(`/report-classes/${id}`, { method: "PUT", body }),
   remove: (id: number) =>
-    apiRequest<void>(`/ReportClasses/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/report-classes/${id}`, { method: "DELETE" }),
 };
 
 export const ReportCategoriesApi = {
   list: (q: PageParams & { reportClassId?: number } = {}) =>
-    paged<ReportCategoryDto>("/ReportCategories", q),
+    paged<ReportCategoryDto>("/report-categories", q),
   create: (body: CreateReportCategoryDto) =>
-    apiRequest<ReportCategoryDto>("/ReportCategories", { method: "POST", body }),
+    apiRequest<ReportCategoryDto>("/report-categories", { method: "POST", body }),
   update: (id: number, body: UpdateReportCategoryDto) =>
-    apiRequest<ReportCategoryDto>(`/ReportCategories/${id}`, { method: "PUT", body }),
+    apiRequest<ReportCategoryDto>(`/report-categories/${id}`, {
+      method: "PUT",
+      body,
+    }),
   remove: (id: number) =>
-    apiRequest<void>(`/ReportCategories/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/report-categories/${id}`, { method: "DELETE" }),
 };
 
 export const ReportTypesApi = {
   list: (q: PageParams & { reportCategoryId?: number } = {}) =>
-    paged<ReportTypeDto>("/ReportTypes", q),
+    paged<ReportTypeDto>("/report-types", q),
   create: (body: CreateReportTypeDto) =>
-    apiRequest<ReportTypeDto>("/ReportTypes", { method: "POST", body }),
+    apiRequest<ReportTypeDto>("/report-types", { method: "POST", body }),
   update: (id: number, body: UpdateReportTypeDto) =>
-    apiRequest<ReportTypeDto>(`/ReportTypes/${id}`, { method: "PUT", body }),
+    apiRequest<ReportTypeDto>(`/report-types/${id}`, { method: "PUT", body }),
   remove: (id: number) =>
-    apiRequest<void>(`/ReportTypes/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/report-types/${id}`, { method: "DELETE" }),
 };
 
 export const ReportsApi = {
-  list: (q: PageParams & { departmentId?: number } = {}) =>
-    paged<ReportDto>("/Reports", q),
-  get: (id: number) => apiRequest<ReportDto>(`/Reports/${id}`),
+  list: (
+    q: PageParams & {
+      departmentId?: number;
+      mdaId?: number;
+      categoryId?: number;
+      name?: string;
+      reportKind?: string;
+    } = {},
+  ) => paged<ReportDto>("/reports", q),
+  get: (id: number) => apiRequest<ReportDto>(`/reports/${id}`),
   create: (body: CreateReportDto) =>
-    apiRequest<ReportDto>("/Reports", { method: "POST", body }),
+    apiRequest<ReportDto>("/reports", { method: "POST", body }),
   update: (id: number, body: UpdateReportDto) =>
-    apiRequest<ReportDto>(`/Reports/${id}`, { method: "PUT", body }),
-  remove: (id: number) => apiRequest<void>(`/Reports/${id}`, { method: "DELETE" }),
+    apiRequest<ReportDto>(`/reports/${id}`, { method: "PUT", body }),
+  remove: (id: number) =>
+    apiRequest<void>(`/reports/${id}`, { method: "DELETE" }),
   typesByCategory: (reportCategoryId: number) =>
-    apiRequest<ReportTypeDto[]>(`/Reports/types/by-category/${reportCategoryId}`),
+    apiRequest<ReportTypeDto[]>(
+      `/reports/types/by-category/${reportCategoryId}`,
+    ),
 };
 
 export const ProjectsApi = {
-  list: (q: PageParams & { departmentId?: number } = {}) =>
-    paged<ProjectDto>("/Projects", q),
-  get: (id: number) => apiRequest<ProjectDto>(`/Projects/${id}`),
+  list: (
+    q: PageParams & {
+      departmentId?: number;
+      mdaId?: number;
+      name?: string;
+    } = {},
+  ) => paged<ProjectDto>("/projects", q),
+  listFlat: (q: { departmentId?: number; mdaId?: number } = {}) =>
+    apiRequest<ProjectListItemDto[]>("/projects/list", { query: q }),
+  get: (id: number) => apiRequest<ProjectDto>(`/projects/${id}`),
   create: (body: CreateProjectDto) =>
-    apiRequest<ProjectDto>("/Projects", { method: "POST", body }),
+    apiRequest<ProjectDto>("/projects", { method: "POST", body }),
   update: (id: number, body: UpdateProjectDto) =>
-    apiRequest<ProjectDto>(`/Projects/${id}`, { method: "PUT", body }),
+    apiRequest<ProjectDto>(`/projects/${id}`, { method: "PUT", body }),
   remove: (id: number) =>
-    apiRequest<void>(`/Projects/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/projects/${id}`, { method: "DELETE" }),
+};
+
+export const FundingSourcesApi = {
+  list: (q: PageParams & { year?: number } = {}) =>
+    paged<FundingSourceDto>("/funding-sources", q),
+  get: (id: number) =>
+    apiRequest<FundingSourceDto>(`/funding-sources/${id}`),
+  create: (body: CreateFundingSourceDto) =>
+    apiRequest<FundingSourceDto>("/funding-sources", {
+      method: "POST",
+      body,
+    }),
+  update: (id: number, body: UpdateFundingSourceDto) =>
+    apiRequest<FundingSourceDto>(`/funding-sources/${id}`, {
+      method: "PUT",
+      body,
+    }),
+  remove: (id: number) =>
+    apiRequest<void>(`/funding-sources/${id}`, { method: "DELETE" }),
 };
 
 export const TargetsApi = {
@@ -122,40 +173,41 @@ export const TargetsApi = {
     q: PageParams & {
       reportId?: number;
       projectId?: number;
-      lgaId?: number;
+      locationId?: number;
     } = {},
-  ) => paged<TargetDto>("/Targets", q),
-  get: (id: number) => apiRequest<TargetDto>(`/Targets/${id}`),
+  ) => paged<TargetDto>("/targets", q),
+  get: (id: number) => apiRequest<TargetDto>(`/targets/${id}`),
   create: (body: CreateTargetDto) =>
-    apiRequest<TargetDto>("/Targets", { method: "POST", body }),
+    apiRequest<TargetDto>("/targets", { method: "POST", body }),
   update: (id: number, body: UpdateTargetDto) =>
-    apiRequest<TargetDto>(`/Targets/${id}`, { method: "PUT", body }),
-  remove: (id: number) => apiRequest<void>(`/Targets/${id}`, { method: "DELETE" }),
+    apiRequest<TargetDto>(`/targets/${id}`, { method: "PUT", body }),
+  remove: (id: number) =>
+    apiRequest<void>(`/targets/${id}`, { method: "DELETE" }),
   computedActual: (
     id: number,
-    q: { reportingPeriodId?: number; lgaId?: number } = {},
+    q: { reportingPeriodId?: number; locationId?: number } = {},
   ) =>
-    apiRequest<number>(`/Targets/${id}/computed-actual`, { query: q }),
+    apiRequest<number>(`/targets/${id}/computed-actual`, { query: q }),
 };
 
 export const TemplatesApi = {
   list: (
     q: PageParams & { reportId?: number; projectId?: number } = {},
-  ) => paged<TemplateDto>("/Templates", q),
-  get: (id: number) => apiRequest<TemplateDto>(`/Templates/${id}`),
+  ) => paged<TemplateDto>("/templates", q),
+  get: (id: number) => apiRequest<TemplateDto>(`/templates/${id}`),
   create: (body: CreateTemplateDto) =>
-    apiRequest<TemplateDto>("/Templates", { method: "POST", body }),
+    apiRequest<TemplateDto>("/templates", { method: "POST", body }),
   update: (id: number, body: UpdateTemplateDto) =>
-    apiRequest<TemplateDto>(`/Templates/${id}`, { method: "PUT", body }),
+    apiRequest<TemplateDto>(`/templates/${id}`, { method: "PUT", body }),
   remove: (id: number) =>
-    apiRequest<void>(`/Templates/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/templates/${id}`, { method: "DELETE" }),
   addField: (templateId: number, body: CreateTemplateFieldDto) =>
-    apiRequest<TemplateFieldDto>(`/Templates/${templateId}/fields`, {
+    apiRequest<TemplateFieldDto>(`/templates/${templateId}/fields`, {
       method: "POST",
       body,
     }),
   removeField: (templateId: number, fieldId: number) =>
-    apiRequest<void>(`/Templates/${templateId}/fields/${fieldId}`, {
+    apiRequest<void>(`/templates/${templateId}/fields/${fieldId}`, {
       method: "DELETE",
     }),
 };
@@ -167,50 +219,75 @@ export const TemplateDataApi = {
       targetId?: number;
       reportingPeriodId?: number;
     } = {},
-  ) => paged<TemplateDataDto>("/TemplateData", q),
-  get: (id: number) => apiRequest<TemplateDataDto>(`/TemplateData/${id}`),
+  ) => paged<TemplateDataDto>("/template-data", q),
+  get: (id: number) =>
+    apiRequest<TemplateDataDto>(`/template-data/${id}`),
   upsert: (body: UpsertTemplateDataDto) =>
-    apiRequest<TemplateDataDto>("/TemplateData", { method: "POST", body }),
+    apiRequest<TemplateDataDto>("/template-data", { method: "POST", body }),
   remove: (id: number) =>
-    apiRequest<void>(`/TemplateData/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/template-data/${id}`, { method: "DELETE" }),
 };
 
 export const TargetProgressApi = {
   list: (q: PageParams & { targetId?: number } = {}) =>
-    paged<TargetProgressDto>("/TargetProgress", q),
-  get: (id: number) => apiRequest<TargetProgressDto>(`/TargetProgress/${id}`),
+    paged<TargetProgressDto>("/target-progress", q),
+  get: (id: number) =>
+    apiRequest<TargetProgressDto>(`/target-progress/${id}`),
   upsert: (body: UpsertTargetProgressDto) =>
-    apiRequest<TargetProgressDto>("/TargetProgress", { method: "POST", body }),
+    apiRequest<TargetProgressDto>("/target-progress", {
+      method: "POST",
+      body,
+    }),
   recalculate: (q: {
     targetId: number;
     userId: number;
     reportingPeriodId: number;
-    lgaId: number;
+    locationId: number;
   }) =>
-    apiRequest<TargetProgressDto>("/TargetProgress/recalculate", {
+    apiRequest<TargetProgressDto>("/target-progress/recalculate", {
       method: "POST",
       query: q,
     }),
   remove: (id: number) =>
-    apiRequest<void>(`/TargetProgress/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/target-progress/${id}`, { method: "DELETE" }),
 };
 
 export const AssignmentsApi = {
-  listUserReports: (q: PageParams & { userId?: number } = {}) =>
-    paged<UserReportDto>("/Assignments/user-reports", q),
+  listUserReports: (
+    q: PageParams & { userId?: number; search?: string } = {},
+  ) => paged<UserReportDto>("/assignments/user-reports", q),
   createUserReport: (body: CreateUserReportDto) =>
-    apiRequest<UserReportDto>("/Assignments/user-reports", {
+    apiRequest<UserReportDto>("/assignments/user-reports", {
       method: "POST",
       body,
     }),
   removeUserReport: (id: number) =>
-    apiRequest<void>(`/Assignments/user-reports/${id}`, { method: "DELETE" }),
-  listUserLgas: (q: PageParams & { userId?: number } = {}) =>
-    paged<UserLgaDto>("/Assignments/user-lgas", q),
+    apiRequest<void>(`/assignments/user-reports/${id}`, {
+      method: "DELETE",
+    }),
+  listUserLgas: (
+    q: PageParams & { userId?: number; search?: string } = {},
+  ) => paged<UserLgaDto>("/assignments/user-lgas", q),
   createUserLga: (body: CreateUserLgaDto) =>
-    apiRequest<UserLgaDto>("/Assignments/user-lgas", { method: "POST", body }),
+    apiRequest<UserLgaDto>("/assignments/user-lgas", {
+      method: "POST",
+      body,
+    }),
   removeUserLga: (id: number) =>
-    apiRequest<void>(`/Assignments/user-lgas/${id}`, { method: "DELETE" }),
+    apiRequest<void>(`/assignments/user-lgas/${id}`, { method: "DELETE" }),
+
+  listUserDepartments: (
+    q: PageParams & { userId?: number; search?: string } = {},
+  ) => paged<UserDepartmentDto>("/assignments/user-departments", q),
+  createUserDepartment: (body: CreateUserDepartmentDto) =>
+    apiRequest<UserDepartmentDto>("/assignments/user-departments", {
+      method: "POST",
+      body,
+    }),
+  removeUserDepartment: (id: number) =>
+    apiRequest<void>(`/assignments/user-departments/${id}`, {
+      method: "DELETE",
+    }),
 };
 
 export type {

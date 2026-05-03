@@ -42,7 +42,7 @@ function CaptureInner() {
 
   const [targetId, setTargetId] = useState<string>("");
   const [reportingPeriodId, setReportingPeriodId] = useState<string>("");
-  const [lgaId, setLgaId] = useState<string>("");
+  const [locationId, setLocationId] = useState<string>("");
   const [values, setValues] = useState<Record<number, string>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -90,7 +90,7 @@ function CaptureInner() {
     if (selectedTarget) {
       /* eslint-disable react-hooks/set-state-in-effect */
       setReportingPeriodId(String(selectedTarget.reportingPeriodId));
-      setLgaId(String(selectedTarget.lgaId));
+      setLocationId(String(selectedTarget.locationId));
       /* eslint-enable react-hooks/set-state-in-effect */
     }
   }, [selectedTarget]);
@@ -103,7 +103,7 @@ function CaptureInner() {
     const errs: Record<string, string> = {};
     if (!session?.userId) errs._user = "Not signed in";
     if (!reportingPeriodId) errs._period = "Reporting period ID required";
-    if (!lgaId) errs._lga = "LGA ID required";
+    if (!locationId) errs._location = "Location ID required";
     if (fields.length === 0) errs._template = "This template has no fields";
     for (const f of fields) {
       if (f.required && !values[f.id]?.toString().trim()) {
@@ -130,7 +130,7 @@ function CaptureInner() {
           templateFieldId: f.id,
           targetId: targetId ? Number(targetId) : null,
           userId: session.userId,
-          lgaId: Number(lgaId),
+          locationId: Number(locationId),
           reportingPeriodId: Number(reportingPeriodId),
           value: String(raw),
         });
@@ -237,13 +237,13 @@ function CaptureInner() {
                 invalid={!!errors._period}
               />
             </Field>
-            <Field label="LGA ID" required error={errors._lga}>
+            <Field label="Location ID" required error={errors._location}>
               <Input
                 type="number"
                 min={1}
-                value={lgaId}
-                onChange={(e) => setLgaId(e.target.value)}
-                invalid={!!errors._lga}
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+                invalid={!!errors._location}
               />
             </Field>
             <div className="rounded-lg border bg-[var(--surface-2)] p-3 text-[11px] muted">
@@ -252,7 +252,7 @@ function CaptureInner() {
                 user #{session?.userId} · {session?.email}
               </b>
               . Submitted values are stored through the{" "}
-              <code>/TemplateData</code> upsert endpoint.
+              <code>/template-data</code> upsert endpoint.
             </div>
           </CardBody>
         </Card>
@@ -305,7 +305,7 @@ function CaptureInner() {
                 ))}
                 <div className="sm:col-span-2 flex items-center gap-2 rounded-lg border bg-[var(--surface-2)] p-3 text-xs muted">
                   <CheckCircle2 className="h-4 w-4 text-[var(--color-brand-600)]" />
-                  Each field writes one <code>TemplateData</code> upsert on
+                  Each field writes one <code>template-data</code> upsert on
                   submit.
                 </div>
               </div>

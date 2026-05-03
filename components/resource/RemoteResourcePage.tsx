@@ -44,6 +44,12 @@ export interface RemoteResourcePageProps<T extends { id: number }, F> {
   rowActions?: (item: T) => ReactNode;
   additionalActions?: ReactNode;
   filters?: ReactNode;
+  /** When this value changes (e.g. API filter id), list page resets to 1. */
+  resetPageWhen?: unknown;
+  /** Applied after search; use for client-side narrowing (non-paged lists). */
+  filterRows?: (row: T & { id: string }) => boolean;
+  /** Empty state copy when filters/search yield no rows. */
+  hasActiveFilters?: boolean;
   emptyMessage?: string;
   modalSize?: "sm" | "md" | "lg" | "xl";
   refreshKey?: unknown;
@@ -72,6 +78,9 @@ export function RemoteResourcePage<T extends { id: number }, F>(
     rowActions,
     additionalActions,
     filters,
+    resetPageWhen,
+    filterRows,
+    hasActiveFilters,
     emptyMessage,
     modalSize = "md",
     refreshKey,
@@ -120,20 +129,30 @@ export function RemoteResourcePage<T extends { id: number }, F>(
     load();
   }, [load]);
 
+  useEffect(() => {
+    setPage(1);
+  }, [resetPageWhen]);
+
   const rows = useMemo(
     () => items.map((it) => ({ ...it, id: String(it.id) }) as T & { id: string }),
     [items],
   );
 
   const filtered = useMemo(() => {
-    if (!search) return rows;
-    const q = search.toLowerCase();
-    return rows.filter((row) =>
-      Object.values(row).some(
-        (v) => v != null && String(v).toLowerCase().includes(q),
-      ),
-    );
-  }, [rows, search]);
+    let list = rows;
+    if (search) {
+      const q = search.toLowerCase();
+      list = list.filter((row) =>
+        Object.values(row).some(
+          (v) => v != null && String(v).toLowerCase().includes(q),
+        ),
+      );
+    }
+    if (filterRows) list = list.filter(filterRows);
+    return list;
+  }, [rows, search, filterRows]);
+
+  const noMatches = filtered.length === 0 && (!!search || !!hasActiveFilters);
 
   function openForm(existing: T | null) {
     if (!renderForm) return;
@@ -270,20 +289,20 @@ export function RemoteResourcePage<T extends { id: number }, F>(
             title={
               loading
                 ? "Loading…"
-                : search
+                : noMatches
                   ? "No results"
                   : `No ${title.toLowerCase()} yet`
             }
             message={
               loading
                 ? "Fetching latest data from the server."
-                : search
-                  ? "Try changing the search filter."
+                : noMatches
+                  ? "Try adjusting your search or filters."
                   : (emptyMessage ??
                     `Get started by adding your first ${singular.toLowerCase()}.`)
             }
             action={
-              !loading && !search && create && renderForm ? (
+              !loading && !noMatches && create && renderForm ? (
                 <Button
                   leftIcon={<Plus className="h-4 w-4" />}
                   onClick={() => openForm(null)}
